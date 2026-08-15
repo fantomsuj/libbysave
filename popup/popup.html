@@ -8,10 +8,9 @@
   </head>
   <body>
     <header>
-      <div class="brand"><img src="../assets/icons/icon-48.png" alt=""><div><strong>LibbySave</strong><small id="siteLabel">Book lists → Libby</small></div></div>
+      <div class="brand"><img src="../assets/icons/icon-48.png" alt=""><div><strong>LibbySave</strong><small id="siteLabel">Any page → Libby</small></div></div>
       <button id="settingsToggle" class="icon-button" aria-label="Settings">⚙</button>
     </header>
-
     <main>
       <section id="setup" class="setup hidden">
         <div class="section-title"><div><small>YOUR LIBRARIES</small><h2>Where do you read?</h2></div></div>
@@ -22,28 +21,27 @@
         <button id="saveSettings" class="primary full">Save settings</button>
         <p class="hint">Use the first part of your OverDrive URL, e.g. <strong>nypl</strong> from nypl.overdrive.com.</p>
       </section>
-
       <section id="empty" class="empty hidden">
         <div class="empty-art">L</div>
-        <h2>Open a book list</h2>
-        <p>LibbySave recognizes Spotify Audiobooks, New York Times Best Sellers, and Goodreads pages.</p>
+        <h2>Find this page’s books</h2>
+        <p>Scan an article, blog post, or selected reading list. Page content stays in your browser.</p>
+        <button id="findBooksEmpty" class="primary full">Find books on this page</button>
+        <small id="scanHint">Tip: select a list on the page first to scan only those recommendations.</small>
       </section>
-
       <section id="booksSection" class="hidden">
         <div class="section-title">
           <div><small>FOUND ON THIS PAGE</small><h2><span id="bookCount">0</span> books</h2></div>
-          <button id="checkAll" class="quiet">Check all</button>
+          <div class="title-actions"><button id="findBooksAgain" class="quiet">Find again</button><button id="checkAll" class="quiet">Check selected</button></div>
         </div>
-        <div class="summary" id="summary"><span>Check availability across your libraries.</span></div>
+        <div class="summary" id="summary"><span>Review matches, then check availability.</span></div>
         <div id="bookList" class="book-list"></div>
         <div class="import-box">
-          <label class="field"><span>Save list to tag</span><input id="importTag"></label>
+          <label class="field"><span>Save selected to tag</span><input id="importTag"></label>
           <div class="import-row"><select id="importLibrary" aria-label="Import library"></select><button id="importAll" class="primary">Send to Libby</button></div>
           <small>Opens Libby and saves each match. Borrowing and holds always require their own explicit click.</small>
         </div>
       </section>
     </main>
-
     <div id="toast" role="status"></div>
     <script src="../src/shared.js"></script>
     <script src="popup.js"></script>

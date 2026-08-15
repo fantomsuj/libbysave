@@ -1,14 +1,12 @@
 {
   "name": "libbysave",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "A dependency-free Chrome extension for Libby availability and list imports.",
   "scripts": {
     "test": "node --test",
-    "check": "node --check src/shared.js && node --check src/adapters/spotify.js && node --check src/background.js && node --check src/content/book-sites.js && node --check src/content/libby.js && node --check popup/popup.js"
+    "check": "node --check src/shared.js && node --check src/adapters/spotify.js && node --check src/generic-extractor.js && node --check src/background.js && node --check src/content/book-sites.js && node --check src/content/generic-page.js && node --check src/content/libby.js && node --check popup/popup.js"
   },
-  "engines": {
-    "node": ">=20"
-  },
+  "engines": { "node": ">=20" },
   "license": "MIT"
 }
