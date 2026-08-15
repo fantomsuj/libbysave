@@ -2,6 +2,7 @@
   "use strict";
 
   const Shared = globalThis.LibbySaveShared;
+  const Directory = globalThis.LibbySaveDirectory;
   const BookSearch = globalThis.LibbySaveBookSearch;
   const SavedBooks = globalThis.LibbySaveSavedBooks;
   const Controller = globalThis.LibbySaveSearchController;
@@ -17,6 +18,10 @@
   let batchRows = [];
   let activeView = "search";
   let toastTimer = null;
+  let librarySearchResults = [];
+  let activeLibraryResult = -1;
+  let librarySearchTimer = null;
+  let librarySearchSequence = 0;
   const selectedSaved = new Set();
   const pageAvailability = new Map();
   const searchLater = Controller.debounce(search, 350);
@@ -28,13 +33,15 @@
       chrome.storage.local.get("settings"),
       chrome.runtime.sendMessage({ type: "GET_SAVED_BOOKS" })
     ]);
-    settings = { ...settings, ...(stored.settings || {}) };
+    settings = Directory.migrateSettings({ ...settings, ...(stored.settings || {}) });
+    await chrome.storage.local.set({ settings });
     savedState = saved?.savedBooks || savedState;
     renderSettings();
     renderSaved();
     bindEvents();
     scanActivePage();
-    setTimeout(() => $("#bookSearch").focus(), 0);
+    if (!settings.libraries.length) setSettingsOpen(true);
+    setTimeout(() => (settings.libraries.length ? $("#bookSearch") : $("#librarySearch")).focus(), 0);
   }
 
   function bindEvents() {
@@ -52,8 +59,10 @@
       $("#bookSearch").dispatchEvent(new Event("input", { bubbles: true }));
       $("#bookSearch").focus();
     }));
-    $("#settingsToggle").addEventListener("click", () => $("#setup").classList.toggle("hidden"));
-    $("#addLibrary").addEventListener("click", () => addLibraryRow({ name: "", slug: "" }));
+    $("#settingsToggle").addEventListener("click", () => setSettingsOpen($("#setup").classList.contains("hidden")));
+    $("#librarySearch").addEventListener("input", scheduleLibrarySearch);
+    $("#librarySearch").addEventListener("keydown", onLibrarySearchKeydown);
+    $("#addManualLibrary").addEventListener("click", addManualLibrary);
     $("#saveSettings").addEventListener("click", saveSettings);
     $("#reviewBatch").addEventListener("click", reviewBatch);
     $("#saveBatch").addEventListener("click", saveBatch);
@@ -336,7 +345,7 @@
 
   async function checkAllPage() {
     if (!settings.libraries.length) {
-      $("#setup").classList.remove("hidden");
+      setSettingsOpen(true);
       return toast("Add your library first.");
     }
     $("#checkAll").textContent = "Checking…";
@@ -367,8 +376,7 @@
   }
 
   function renderSettings() {
-    $("#libraryRows").innerHTML = "";
-    (settings.libraries.length ? settings.libraries : [{ name: "", slug: "" }]).forEach(addLibraryRow);
+    renderSelectedLibraries();
     $("#targetTag").value = settings.targetTag;
     $("#importTag").value = settings.targetTag;
     $("#savedImportTag").value = settings.targetTag;
@@ -376,23 +384,156 @@
     renderLibrarySelects();
   }
 
-  function addLibraryRow(library) {
-    const row = document.createElement("div");
-    row.className = "library-row";
-    row.innerHTML = '<input data-field="name" aria-label="Library name" placeholder="NYPL" value="' + escapeAttr(library.name || "") + '"><input data-field="slug" aria-label="OverDrive slug" placeholder="nypl" value="' + escapeAttr(library.slug || "") + '"><button aria-label="Remove library">×</button>';
-    row.querySelector("button").addEventListener("click", () => row.remove());
-    $("#libraryRows").appendChild(row);
+  function scheduleLibrarySearch() {
+    clearTimeout(librarySearchTimer);
+    const query = $("#librarySearch").value.trim();
+    activeLibraryResult = -1;
+    if (query.length < 2) {
+      librarySearchResults = [];
+      renderLibraryResults();
+      setLibraryStatus("Type at least 2 characters to search.");
+      return;
+    }
+    setLibraryStatus("Searching Libby’s directory…");
+    librarySearchTimer = setTimeout(() => searchLibraries(query), 220);
+  }
+
+  async function searchLibraries(query) {
+    const sequence = ++librarySearchSequence;
+    try {
+      const response = await chrome.runtime.sendMessage({ type: "SEARCH_LIBRARIES", query });
+      if (sequence !== librarySearchSequence) return;
+      if (!response?.ok) throw new Error(response?.error || "Library search failed.");
+      librarySearchResults = response.results || [];
+      activeLibraryResult = librarySearchResults.length ? 0 : -1;
+      renderLibraryResults();
+      setLibraryStatus(librarySearchResults.length
+        ? librarySearchResults.length + " " + (librarySearchResults.length === 1 ? "library" : "libraries") + " found."
+        : "No libraries found for “" + query + "”. Try a nearby city or use the advanced option.");
+    } catch (_) {
+      if (sequence !== librarySearchSequence) return;
+      librarySearchResults = [];
+      renderLibraryResults();
+      setLibraryStatus("Library search is unavailable. Check your connection or add a slug manually.");
+    }
+  }
+
+  function renderLibraryResults() {
+    const list = $("#libraryResults");
+    list.classList.toggle("hidden", !librarySearchResults.length);
+    $("#librarySearch").setAttribute("aria-expanded", String(Boolean(librarySearchResults.length)));
+    $("#librarySearch").removeAttribute("aria-activedescendant");
+    list.innerHTML = librarySearchResults.map((library, index) => {
+      const location = [library.city, library.regionCode || library.region, library.countryCode && library.countryCode !== "US" ? library.countryCode : ""].filter(Boolean).join(", ");
+      return '<div id="library-result-' + index + '" class="library-result' + (index === activeLibraryResult ? " active" : "") + '" role="option" aria-selected="' + String(index === activeLibraryResult) + '" data-index="' + index + '" tabindex="-1"><strong>' + escapeHtml(library.name) + (library.isConsortium ? '<span class="consortium-badge">Consortium</span>' : "") + '</strong><span>' + escapeHtml(location || "Location not listed") + '</span><span class="result-domain">' + escapeHtml(library.domain) + "</span></div>";
+    }).join("");
+    if (activeLibraryResult >= 0) $("#librarySearch").setAttribute("aria-activedescendant", "library-result-" + activeLibraryResult);
+    list.querySelectorAll("[role=option]").forEach((option) => {
+      option.addEventListener("mousedown", (event) => event.preventDefault());
+      option.addEventListener("click", () => selectLibrary(librarySearchResults[Number(option.dataset.index)]));
+    });
+  }
+
+  function onLibrarySearchKeydown(event) {
+    if (event.key === "Escape") {
+      librarySearchResults = [];
+      activeLibraryResult = -1;
+      renderLibraryResults();
+      return;
+    }
+    if (!["ArrowDown", "ArrowUp", "Enter"].includes(event.key) || !librarySearchResults.length) return;
+    event.preventDefault();
+    if (event.key === "Enter") return selectLibrary(librarySearchResults[Math.max(0, activeLibraryResult)]);
+    const delta = event.key === "ArrowDown" ? 1 : -1;
+    activeLibraryResult = (activeLibraryResult + delta + librarySearchResults.length) % librarySearchResults.length;
+    renderLibraryResults();
+    document.getElementById("library-result-" + activeLibraryResult)?.scrollIntoView({ block: "nearest" });
+  }
+
+  async function selectLibrary(library) {
+    if (settings.libraries.some((candidate) => candidate.slug === library.slug)) {
+      toast("That library is already added.");
+    } else {
+      settings.libraries = Directory.addLibrarySelection(settings.libraries, { ...library, source: "directory" });
+      await persistSettings();
+      await refreshInline();
+      renderSelectedLibraries();
+      renderLibrarySelects();
+      toast(library.name + " added.");
+    }
+    $("#librarySearch").value = "";
+    librarySearchResults = [];
+    activeLibraryResult = -1;
+    renderLibraryResults();
+    setLibraryStatus("Type at least 2 characters to search.");
+    $("#librarySearch").focus();
+  }
+
+  async function addManualLibrary() {
+    const library = Directory.manualLibrary($("#manualName").value, $("#manualSlug").value);
+    if (!library) {
+      $("#manualError").textContent = "Enter a valid slug or OverDrive URL.";
+      return;
+    }
+    $("#manualError").textContent = "";
+    if (settings.libraries.some((candidate) => candidate.slug === library.slug)) {
+      toast("That library is already added.");
+      return;
+    }
+    settings.libraries = Directory.addLibrarySelection(settings.libraries, library);
+    await persistSettings();
+    await refreshInline();
+    renderSelectedLibraries();
+    renderLibrarySelects();
+    $("#manualName").value = "";
+    $("#manualSlug").value = "";
+    toast(library.name + " added.");
+  }
+
+  function renderSelectedLibraries() {
+    const container = $("#selectedLibraries");
+    $("#selectedCount").textContent = settings.libraries.length + " selected";
+    container.innerHTML = settings.libraries.length ? settings.libraries.map((library, index) => '<div class="selected-library"><strong>' + escapeHtml(library.name) + '</strong><small>' + escapeHtml(library.domain || library.slug + ".overdrive.com") + '</small><button data-index="' + index + '" aria-label="Remove ' + escapeAttr(library.name) + '">Remove</button></div>').join("") : '<p class="selected-empty">No libraries selected yet.</p>';
+    container.querySelectorAll("button[data-index]").forEach((button) => button.addEventListener("click", async () => {
+      settings.libraries.splice(Number(button.dataset.index), 1);
+      await persistSettings();
+      await refreshInline();
+      renderSelectedLibraries();
+      renderLibrarySelects();
+    }));
+  }
+
+  function setLibraryStatus(message) {
+    $("#libraryStatus").textContent = message;
+  }
+
+  async function persistSettings() {
+    settings.targetTag = $("#targetTag").value.trim() || settings.targetTag || "Saved from LibbySave";
+    settings.autoCheck = $("#autoCheck").checked;
+    settings.settingsVersion = 2;
+    await chrome.storage.local.set({ settings });
   }
 
   async function saveSettings() {
-    const libraries = $$(".library-row").map((row) => ({ name: row.querySelector("[data-field=name]").value.trim(), slug: Shared.librarySlug(row.querySelector("[data-field=slug]").value) })).filter((library) => library.slug).map((library) => ({ ...library, name: library.name || library.slug }));
-    settings = { ...settings, libraries, targetTag: $("#targetTag").value.trim() || "Saved from LibbySave", autoCheck: $("#autoCheck").checked };
-    await chrome.storage.local.set({ settings });
+    await persistSettings();
     $("#importTag").value = settings.targetTag;
     $("#savedImportTag").value = settings.targetTag;
     renderLibrarySelects();
-    $("#setup").classList.add("hidden");
+    setSettingsOpen(false);
     toast("Settings saved.");
+    await refreshInline();
+  }
+
+  function setSettingsOpen(open) {
+    $("#setup").classList.toggle("hidden", !open);
+    $("main").classList.toggle("settings-open", open);
+    $("#settingsToggle").setAttribute("aria-expanded", String(open));
+    if (open) setTimeout(() => $("#librarySearch").focus(), 0);
+  }
+
+  async function refreshInline() {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.id) await chrome.tabs.sendMessage(tab.id, { type: "REFRESH_INLINE" }).catch(() => {});
   }
 
   function renderLibrarySelects() {

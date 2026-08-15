@@ -3,6 +3,7 @@
 LibbySave is a Manifest V3 Chrome extension that turns online book discovery into a library action:
 
 - Searches for books directly from the popup by title, author, ISBN, or a recognized book URL.
+- Finds libraries by name, city, state/province, postal code, or OverDrive domain without requiring slug knowledge.
 - Saves a persistent reading list locally before availability checks finish.
 - Shows Libby availability inline on Spotify Audiobook, New York Times, and Goodreads pages.
 - Checks multiple OverDrive/Libby libraries and surfaces copies, holds, and estimated waits.
@@ -16,13 +17,22 @@ LibbySave is a Manifest V3 Chrome extension that turns online book discovery int
 2. Open `chrome://extensions` in Chrome.
 3. Turn on **Developer mode**.
 4. Select **Load unpacked** and choose this repository's root directory.
-5. Pin LibbySave, open its popup, and add a library name and OverDrive slug. For `nypl.overdrive.com`, the slug is `nypl`.
-6. Type `The Stranger Camus`, use Arrow keys to choose the result, and press Enter to save it.
-7. Optionally open a Spotify audiobook/title collection, NYT Best Sellers page, or Goodreads page for inline availability.
+5. Pin LibbySave, open its popup, and find your library by name, city, state/province, ZIP/postal code, or OverDrive domain.
+6. Select one or more library systems. LibbySave stores the correct OverDrive identifier automatically.
+7. Type `The Stranger Camus`, use Arrow keys to choose the result, and press Enter to save it.
+8. Optionally open a Spotify audiobook/title collection, NYT Best Sellers page, or Goodreads page for inline availability.
 
 No build step or production dependencies are required.
 
 ## How it works
+
+### Library directory
+
+Library setup searches Libby's official locator service at `locate.libbyapp.com`, which returns the libraries, branches, consortiums, and regional systems currently discoverable through Libby. It requires no API key. Results are normalized behind the replaceable `LibraryDirectoryProvider` in `src/library-directory.js`, then ranked deterministically: exact names, name prefixes, city/state or postal matches, and loose fuzzy matches.
+
+The provider queries the maintained remote directory instead of shipping a redistributable snapshot. Up to 30 recent query result sets are cached in `chrome.storage.local` for seven days, so the popup does not download or parse the full directory at startup and a recent query can still work offline. Direct slug/domain input may also be resolved through OverDrive's catalog endpoint. A small advanced manual-slug form remains available when an institution is missing or the provider is unavailable.
+
+Existing `{ name, slug }` settings migrate in place to settings version 2; names and slugs are preserved while optional directory metadata is added only for newly selected results. Multiple libraries are supported and duplicate slugs are rejected.
 
 ### Popup search and Saved books
 
@@ -76,12 +86,14 @@ npm run check
 
 Tests use Node's built-in test runner. There is no bundler and no remotely hosted executable code.
 
-Coverage includes title, author, combined title/author, ISBN-10/13, URL parsing, fuzzy spelling, editions, keyboard navigation, Enter-to-save behavior, Undo/restore, duplicate prevention, asynchronous availability enrichment, multiline review, ambiguous matches, offline/rate-limit errors, storage migration, and corrupted saved data.
+Coverage includes title, author, combined title/author, ISBN-10/13, URL parsing, fuzzy spelling, editions, keyboard navigation, Enter-to-save behavior, Undo/restore, duplicate prevention, asynchronous availability enrichment, multiline review, ambiguous matches, offline/rate-limit errors, storage migration, and corrupted saved data. Directory tests cover exact library names, city/state, postal codes, fuzzy misspellings, consortium metadata, duplicate prevention, multiple selections, legacy settings migration, manual fallback, empty/error responses, caching, direct slug lookup, and deterministic ranking.
 
 ## Important limitations
 
 - The availability endpoint is public but undocumented for third-party production use. Before Chrome Web Store distribution, request official OverDrive API access or confirm permitted usage.
 - Open Library documents its search API for low-volume, human-facing discovery, but should not be treated as a high-traffic or bulk metadata backend. LibbySave's provider boundary allows a future approved catalog source to replace it.
+- Libby's locator is authoritative for what Libby currently makes discoverable, but it is not a separately documented third-party API contract. Coverage and available branch metadata depend on the provider; some results omit city, postal code, or country. Confirm production usage with OverDrive before Chrome Web Store distribution.
+- New uncached library searches require a connection. An unexpired cached query and the advanced manual-slug fallback remain available offline.
 - Opaque links that contain no human-readable title or ISBN (some Spotify and StoryGraph URLs) can be recognized but may still require the user to type or copy the visible title for a reliable match. No broad host permission is added merely to scrape pasted links.
 - Libby is a dynamic web app. The import/circulation automation uses accessible labels and conservative matching, but Libby UI changes can require selector updates.
 - List extraction is best-effort because Spotify, NYT, and Goodreads can change their markup. Spotify detection intentionally skips cards that do not expose enough public audiobook/title/author information.

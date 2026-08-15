@@ -6,6 +6,7 @@
   "permissions": ["storage"],
   "host_permissions": [
     "https://openlibrary.org/*",
+    "https://locate.libbyapp.com/*",
     "https://thunder.api.overdrive.com/*",
     "https://libbyapp.com/*"
   ],

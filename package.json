@@ -5,7 +5,7 @@
   "description": "A dependency-free Chrome extension for book search, saved lists, and Libby availability.",
   "scripts": {
     "test": "node --test",
-    "check": "node --check src/shared.js && node --check src/libby-automation.js && node --check src/book-search.js && node --check src/saved-books.js && node --check src/search-controller.js && node --check src/adapters/spotify.js && node --check src/background.js && node --check src/content/book-sites.js && node --check src/content/libby.js && node --check popup/state.js && node --check popup/popup.js && node --check popup/fixtures.js"
+    "check": "node --check src/shared.js && node --check src/library-directory.js && node --check src/libby-automation.js && node --check src/book-search.js && node --check src/saved-books.js && node --check src/search-controller.js && node --check src/adapters/spotify.js && node --check src/background.js && node --check src/content/book-sites.js && node --check src/content/libby.js && node --check popup/state.js && node --check popup/popup.js && node --check popup/fixtures.js"
   },
   "engines": {
     "node": ">=20"

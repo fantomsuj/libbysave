@@ -1,8 +1,9 @@
 "use strict";
 
-importScripts("shared.js", "book-search.js", "saved-books.js");
+importScripts("shared.js", "library-directory.js", "book-search.js", "saved-books.js");
 
 const Shared = globalThis.LibbySaveShared;
+const Directory = globalThis.LibbySaveDirectory;
 const BookSearch = globalThis.LibbySaveBookSearch;
 const SavedBooks = globalThis.LibbySaveSavedBooks;
 const searchProvider = new BookSearch.OpenLibraryProvider();
@@ -18,13 +19,28 @@ const FORMATS = [
 
 chrome.runtime.onInstalled.addListener(async () => {
   const current = await chrome.storage.local.get(["settings"]);
-  if (!current.settings) {
-    await chrome.storage.local.set({
-      settings: { libraries: [], targetTag: "Saved from LibbySave", autoCheck: true }
-    });
-  }
+  await chrome.storage.local.set({ settings: Directory.migrateSettings(current.settings) });
   await SavedBooks.read(chrome.storage.local);
 });
+
+const directoryCache = {
+  async get(key) {
+    const stored = await chrome.storage.local.get("libraryDirectoryCache");
+    return stored.libraryDirectoryCache?.entries?.[key] || null;
+  },
+  async set(key, value, limit) {
+    const stored = await chrome.storage.local.get("libraryDirectoryCache");
+    const cache = stored.libraryDirectoryCache || { entries: {}, order: [] };
+    cache.entries[key] = value;
+    cache.order = [key, ...(cache.order || []).filter((candidate) => candidate !== key)].slice(0, limit);
+    Object.keys(cache.entries).forEach((candidate) => {
+      if (!cache.order.includes(candidate)) delete cache.entries[candidate];
+    });
+    await chrome.storage.local.set({ libraryDirectoryCache: cache });
+  }
+};
+
+const directoryProvider = new Directory.LibraryDirectoryProvider({ fetcher: fetch, cache: directoryCache });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const task = handleMessage(message, sender);
@@ -35,6 +51,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 async function handleMessage(message) {
   switch (message?.type) {
+    case "SEARCH_LIBRARIES":
+      return { ok: true, results: await directoryProvider.search(message.query) };
     case "CHECK_BOOK":
       return { ok: true, results: await checkBook(message.book, message.libraries) };
     case "CHECK_BOOKS":
