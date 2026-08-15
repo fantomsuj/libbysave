@@ -149,8 +149,11 @@
   }
 
   function availabilityText(result) {
-    if (result.status === "available") return `${result.format === "audiobook" ? "Audiobook" : "Ebook"} available now`;
-    if (result.status === "wait") return result.estimatedWaitDays ? `about ${Math.max(1, Math.ceil(result.estimatedWaitDays / 7))} week wait` : `${result.holdsCount || ""} holds`.trim();
+    if (result.status === "available") return result.isAlternative ? "Ebook available as an alternative" : `${result.format === "audiobook" ? "Audiobook" : "Ebook"} available now`;
+    if (result.status === "wait") {
+      const wait = result.estimatedWaitDays ? `about ${Math.max(1, Math.ceil(result.estimatedWaitDays / 7))} week wait` : `${result.holdsCount || ""} holds`.trim();
+      return `${result.format === "audiobook" ? "Audiobook" : "Ebook"} · ${wait}`;
+    }
     if (result.status === "notify") return "not owned · Notify Me";
     if (result.status === "error") return result.error || "couldn’t check";
     return "not found";

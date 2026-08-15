@@ -1,0 +1,15 @@
+{
+  "page": {
+    "url": "https://open.spotify.com/show/single-book",
+    "heading": "The Ministry of Time",
+    "description": "Audiobook on Spotify"
+  },
+  "records": [
+    {
+      "kind": "Audiobook",
+      "title": "The Ministry of Time",
+      "text": "Audiobook\nWritten by Kaliane Bradley\nNarrated by George Weightman and Katie Leung",
+      "href": "https://open.spotify.com/show/single-book"
+    }
+  ]
+}

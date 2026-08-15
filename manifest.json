@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "LibbySave",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "See Libby availability on book lists and save whole lists to a Libby tag.",
   "permissions": ["storage"],
   "host_permissions": [
@@ -31,9 +31,10 @@
         "https://www.nytimes.com/*",
         "https://nytimes.com/*",
         "https://www.goodreads.com/*",
-        "https://goodreads.com/*"
+        "https://goodreads.com/*",
+        "https://open.spotify.com/*"
       ],
-      "js": ["src/shared.js", "src/content/book-sites.js"],
+      "js": ["src/shared.js", "src/adapters/spotify.js", "src/content/book-sites.js"],
       "css": ["src/content/book-sites.css"],
       "run_at": "document_idle"
     },

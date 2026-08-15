@@ -1,0 +1,26 @@
+{
+  "page": {
+    "url": "https://open.spotify.com/search/audiobooks",
+    "heading": "Audiobook search results"
+  },
+  "records": [
+    {
+      "title": "Orbital",
+      "authorCandidates": ["Narrated by Sarah Naudi", "Written by Samantha Harvey"],
+      "text": "Audiobook",
+      "href": "https://open.spotify.com/show/orbital"
+    },
+    {
+      "title": "Orbital",
+      "authorCandidates": ["Written by Samantha Harvey"],
+      "text": "Audiobook duplicate after rerender",
+      "href": "https://open.spotify.com/show/orbital"
+    },
+    {
+      "title": "Good Material",
+      "authorCandidates": ["By Dolly Alderton and Annie Macmanus"],
+      "text": "Audiobook | Narrated by Arthur Darvill",
+      "href": "https://open.spotify.com/show/good-material"
+    }
+  ]
+}

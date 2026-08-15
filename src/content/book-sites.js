@@ -2,8 +2,13 @@
   "use strict";
 
   const Shared = globalThis.LibbySaveShared;
+  const Spotify = globalThis.LibbySaveSpotify;
   const nodeByKey = new Map();
+  const bookCache = new Map();
+  const availabilityCache = new Map();
   let books = [];
+  let lastUrl = location.href;
+  let scanTimer = null;
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === "SCAN_PAGE") {
@@ -23,31 +28,74 @@
     books = scanPage();
     const { settings } = await chrome.storage.local.get("settings");
     if (settings?.autoCheck && settings.libraries?.length && books.length) {
-      await renderInline(books.slice(0, 30));
+      await renderInline(books);
     }
+    if (isSpotify()) observeSpotify();
   }
 
   function siteName() {
     if (location.hostname.includes("goodreads")) return "Goodreads";
     if (location.hostname.includes("nytimes")) return "The New York Times";
+    if (isSpotify()) return "Spotify Audiobooks";
     return location.hostname;
   }
 
+  function isSpotify() {
+    return location.hostname === "open.spotify.com";
+  }
+
   function scanPage() {
+    if (location.href !== lastUrl) {
+      lastUrl = location.href;
+      bookCache.clear();
+      availabilityCache.clear();
+    }
     nodeByKey.clear();
-    const found = location.hostname.includes("goodreads") ? scanGoodreads() : scanNyt();
+    const found = isSpotify()
+      ? Spotify.scanDocument(document, location.href)
+      : location.hostname.includes("goodreads") ? scanGoodreads() : scanNyt();
     const clean = Shared.dedupeBooks(found.map((entry) => ({
       ...entry,
       title: Shared.cleanTitle(entry.title),
       author: Shared.cleanAuthor(entry.author),
       source: siteName(),
-      sourceUrl: location.href
+      sourceUrl: location.href,
+      preferredFormat: entry.preferredFormat || ""
     })));
-    clean.forEach((book) => {
-      const original = found.find((candidate) => Shared.bookKey(candidate) === Shared.bookKey(book));
-      if (original?.node) nodeByKey.set(Shared.bookKey(book), original.node);
+    found.forEach((candidate) => {
+      const normalized = {
+        ...candidate,
+        title: Shared.cleanTitle(candidate.title),
+        author: Shared.cleanAuthor(candidate.author)
+      };
+      if (candidate.node) addNode(Shared.bookKey(normalized), candidate.node);
     });
-    return clean;
+    if (!isSpotify()) return clean;
+    clean.forEach((book) => bookCache.set(Shared.bookKey(book), book));
+    return [...bookCache.values()];
+  }
+
+  function addNode(key, node) {
+    if (!nodeByKey.has(key)) nodeByKey.set(key, new Set());
+    nodeByKey.get(key).add(node);
+  }
+
+  function observeSpotify() {
+    const observer = new MutationObserver((mutations) => {
+      const relevant = mutations.some((mutation) => [...mutation.addedNodes].some((node) => {
+        if (node.nodeType !== Node.ELEMENT_NODE || node.closest?.(".libbysave-inline")) return false;
+        return node.matches?.("a[href*='/show/'], a[href*='/audiobook/'], main, [role='listitem'], [data-testid*='card' i]")
+          || node.querySelector?.("a[href*='/show/'], a[href*='/audiobook/']");
+      }));
+      if (!relevant && location.href === lastUrl) return;
+      clearTimeout(scanTimer);
+      scanTimer = setTimeout(async () => {
+        books = scanPage();
+        const { settings } = await chrome.storage.local.get("settings");
+        if (settings?.autoCheck && settings.libraries?.length) await renderInline(books);
+      }, 450);
+    });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
   }
 
   function scanGoodreads() {
@@ -109,20 +157,33 @@
   async function renderInline(targetBooks) {
     for (const book of targetBooks) {
       const key = Shared.bookKey(book);
-      const node = nodeByKey.get(key);
-      if (!node || node.querySelector?.(`[data-libbysave-key="${cssEscape(key)}"]`)) continue;
-      const badge = document.createElement("div");
-      badge.className = "libbysave-inline libbysave-loading";
-      badge.dataset.libbysaveKey = key;
-      badge.innerHTML = `<span class="libbysave-mark">L</span><span>Checking Libby…</span>`;
-      node.appendChild(badge);
+      const nodes = [...(nodeByKey.get(key) || [])].filter((node) => node?.isConnected);
+      if (!nodes.length) continue;
+      const badges = [];
+      nodes.forEach((node) => {
+        let badge = node.querySelector?.(`[data-libbysave-key="${cssEscape(key)}"]`);
+        if (!badge) {
+          badge = document.createElement("div");
+          badge.className = "libbysave-inline libbysave-loading";
+          badge.dataset.libbysaveKey = key;
+          badge.innerHTML = `<span class="libbysave-mark">L</span><span>Checking Libby…</span>`;
+          node.appendChild(badge);
+        }
+        badges.push(badge);
+      });
+      if (availabilityCache.has(key)) {
+        badges.forEach((badge) => updateBadge(badge, availabilityCache.get(key)));
+        continue;
+      }
       const response = await chrome.runtime.sendMessage({ type: "CHECK_BOOK", book: serializableBook(book) });
-      updateBadge(badge, response?.results || []);
+      const results = response?.results || [];
+      availabilityCache.set(key, results);
+      badges.forEach((badge) => updateBadge(badge, results));
     }
   }
 
   function updateBadge(badge, results) {
-    const ranked = [...results].sort((a, b) => statusRank(a.status) - statusRank(b.status));
+    const ranked = [...results].sort((a, b) => Number(a.isAlternative) - Number(b.isAlternative) || statusRank(a.status) - statusRank(b.status));
     const best = ranked[0];
     badge.classList.remove("libbysave-loading");
     if (!best || best.status === "error") {
@@ -134,7 +195,7 @@
     const url = best.libbyUrl || best.searchUrl;
     badge.classList.add(`libbysave-${best.status}`);
     const action = best.status === "available" ? "borrow" : best.status === "wait" ? "hold" : "";
-    badge.innerHTML = `<span class="libbysave-mark">L</span><a href="${escapeAttr(url)}" target="_blank" rel="noreferrer">${escapeHtml(label)}</a>${action ? `<button type="button">${action === "borrow" ? "Borrow" : "Hold"}</button>` : ""}`;
+    badge.innerHTML = `<span class="libbysave-mark">L</span><a href="${escapeAttr(url)}" target="_blank" rel="noreferrer">${escapeHtml(label)}</a>${action ? `<button type="button">${action === "borrow" ? "Borrow now" : "Place hold"}</button>` : ""}`;
     badge.querySelector("button")?.addEventListener("click", async () => {
       const book = books.find((candidate) => Shared.bookKey(candidate) === badge.dataset.libbysaveKey);
       await chrome.runtime.sendMessage({ type: "START_CIRCULATION", action, book: serializableBook(book), result: best });
@@ -143,10 +204,10 @@
 
   function availabilityLabel(result) {
     const library = result.library?.name || result.library?.slug || "your library";
-    if (result.status === "available") return `${result.format === "audiobook" ? "Audiobook" : "Ebook"} available now · ${library}`;
+    if (result.status === "available") return `${result.isAlternative ? "Ebook available as an alternative" : result.format === "audiobook" ? "Audiobook available now" : "Ebook available now"} · ${library}`;
     if (result.status === "wait") {
       const wait = result.estimatedWaitDays ? `~${Math.max(1, Math.ceil(result.estimatedWaitDays / 7))} week wait` : "Wait list";
-      return `${wait} · ${library}`;
+      return `${result.format === "audiobook" ? "Audiobook" : "Ebook"} · ${wait} · ${library}`;
     }
     if (result.status === "notify") return `Notify Me · ${library}`;
     return `Not found · ${library}`;
@@ -157,7 +218,7 @@
   }
 
   function serializableBook(book) {
-    return { title: book.title, author: book.author || "", source: book.source, sourceUrl: book.sourceUrl };
+    return { title: book.title, author: book.author || "", source: book.source, sourceUrl: book.sourceUrl, preferredFormat: book.preferredFormat || "" };
   }
 
   function cssEscape(value) {

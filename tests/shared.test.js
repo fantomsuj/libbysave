@@ -41,3 +41,23 @@ test("maps catalog availability states", () => {
   assert.equal(Shared.statusFor({ isRecommendableToLibrary: true }), "notify");
   assert.equal(Shared.statusFor(null), "not-found");
 });
+
+test("Spotify audiobooks prefer a waiting audiobook over an available ebook", () => {
+  const book = { title: "James", author: "Percival Everett", preferredFormat: "audiobook" };
+  const best = Shared.selectBestMatch(book, [
+    { id: "ebook", title: "James", firstCreatorName: "Percival Everett", type: { id: "ebook" }, isAvailable: true },
+    { id: "audio", title: "James", firstCreatorName: "Percival Everett", type: { id: "audiobook" }, holdsCount: 12 }
+  ]);
+  assert.equal(best.item.id, "audio");
+  assert.equal(best.format, "audiobook");
+  assert.equal(best.isAlternative, false);
+});
+
+test("marks an ebook as an alternative only when no audiobook match exists", () => {
+  const book = { title: "James", author: "Percival Everett", preferredFormat: "audiobook" };
+  const best = Shared.selectBestMatch(book, [
+    { id: "ebook", title: "James", firstCreatorName: "Percival Everett", type: { id: "ebook" }, isAvailable: true }
+  ]);
+  assert.equal(best.item.id, "ebook");
+  assert.equal(best.isAlternative, true);
+});

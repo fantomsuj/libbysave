@@ -99,11 +99,7 @@ async function checkBook(book, suppliedLibraries) {
     const response = await fetch(`https://thunder.api.overdrive.com/v2/libraries/${encodeURIComponent(slug)}/media?${params}`);
     if (!response.ok) throw new Error(`${library.name || slug}: catalog returned ${response.status}`);
     const payload = await response.json();
-    const matches = (payload.items || [])
-      .map((item) => ({ item, score: Shared.matchScore(book, item) }))
-      .filter(({ score }) => score >= 0.48)
-      .sort((a, b) => b.score - a.score || Number(b.item.isAvailable) - Number(a.item.isAvailable));
-    const best = matches[0];
+    const best = Shared.selectBestMatch(book, payload.items || []);
     if (!best) {
       return { library: { ...library, slug }, status: "not-found", searchUrl: Shared.libbySearchUrl(slug, book) };
     }
@@ -114,7 +110,8 @@ async function checkBook(book, suppliedLibraries) {
       score: best.score,
       title: item.title,
       author: item.firstCreatorName,
-      format: item.type?.id || "ebook",
+      format: best.format,
+      isAlternative: best.isAlternative,
       availableCopies: item.availableCopies || 0,
       ownedCopies: item.ownedCopies || 0,
       holdsCount: item.holdsCount || 0,
