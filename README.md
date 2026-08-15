@@ -2,7 +2,7 @@
 
 LibbySave is a Manifest V3 Chrome extension that turns online book discovery into a library action:
 
-- Shows ebook and audiobook availability inline on New York Times and Goodreads pages.
+- Shows Libby availability inline on Spotify Audiobook, New York Times, and Goodreads pages.
 - Checks multiple OverDrive/Libby libraries and surfaces copies, holds, and estimated waits.
 - Offers explicit **Borrow now** and **Place hold** actions that finish inside the user's signed-in Libby tab.
 - Sends a whole book list to a user-selected Libby tag with progress, pause, skip, and review controls.
@@ -15,7 +15,7 @@ LibbySave is a Manifest V3 Chrome extension that turns online book discovery int
 3. Turn on **Developer mode**.
 4. Select **Load unpacked** and choose this repository's root directory.
 5. Pin LibbySave, open its popup, and add a library name and OverDrive slug. For `nypl.overdrive.com`, the slug is `nypl`.
-6. Open a supported NYT Best Sellers or Goodreads page.
+6. Open a Spotify audiobook/title collection, NYT Best Sellers page, or Goodreads page.
 
 No build step or production dependencies are required.
 
@@ -23,7 +23,7 @@ No build step or production dependencies are required.
 
 ### Availability
 
-Book-site content scripts extract title/author pairs and request catalog checks from the service worker. The catalog adapter queries OverDrive's public Thunder catalog endpoint, scores possible title/author matches, and returns the best format and availability for each configured library.
+Source adapters extract title/author pairs and request catalog checks from the service worker. The Spotify adapter reads visible DOM, accessible labels, audiobook URLs, and public embedded metadata; it does not use Spotify credentials or private APIs. The isolated catalog adapter queries OverDrive's public Thunder endpoint, scores possible matches, and returns availability for each configured library. Spotify discoveries prefer matching audiobooks even when the audiobook has a wait; an available ebook is shown as an alternative only when no matching audiobook exists.
 
 ### Borrowing and holds
 
@@ -37,6 +37,9 @@ The popup sends selected books to a persisted import queue. LibbySave opens sear
 
 - New York Times book and Best Seller pages
 - Goodreads book pages, lists, and shelves
+- Spotify audiobook title pages, collections, genres, recommendations, and search results
+
+Spotify's adapter also handles client-side navigation and conservatively rescans relevant additions from virtualized lists. Books already seen on the current Spotify route are retained for popup review and whole-list tag import, while duplicate cards and injected badges are deduplicated.
 
 The extractor/provider boundaries are deliberately small so StoryGraph, Bookshop.org, pasted ISBN lists, and an approved OverDrive API client can be added later.
 
@@ -53,7 +56,7 @@ Tests use Node's built-in test runner. There is no bundler and no remotely hoste
 
 - The availability endpoint is public but undocumented for third-party production use. Before Chrome Web Store distribution, request official OverDrive API access or confirm permitted usage.
 - Libby is a dynamic web app. The import/circulation automation uses accessible labels and conservative matching, but Libby UI changes can require selector updates.
-- List extraction is best-effort because NYT and Goodreads can change their markup.
+- List extraction is best-effort because Spotify, NYT, and Goodreads can change their markup. Spotify detection intentionally skips cards that do not expose enough public audiobook/title/author information.
 
 ## License
 

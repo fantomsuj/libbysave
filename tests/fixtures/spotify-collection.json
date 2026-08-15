@@ -1,0 +1,25 @@
+{
+  "page": {
+    "url": "https://open.spotify.com/genre/audiobooks-page",
+    "heading": "Audiobooks for you"
+  },
+  "records": [
+    {
+      "title": "James",
+      "authorCandidates": ["Percival Everett"],
+      "text": "Audiobook | Narrated by Dominic Hoffman",
+      "href": "https://open.spotify.com/show/james"
+    },
+    {
+      "title": "The Bright Sword",
+      "authorCandidates": ["Lev Grossman"],
+      "text": "Audiobook | Read by Nicholas Guy Smith",
+      "href": "https://open.spotify.com/show/bright-sword"
+    },
+    {
+      "title": "The Women",
+      "text": "Audiobook | Author: Kristin Hannah | Narrated by Julia Whelan",
+      "href": "https://open.spotify.com/show/the-women"
+    }
+  ]
+}

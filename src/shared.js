@@ -88,6 +88,29 @@
     return "wait";
   }
 
+  function mediaFormat(item) {
+    const value = [item?.type?.id, item?.type?.name, item?.format, ...(item?.formats || []).map((format) => format?.id || format?.name)]
+      .filter(Boolean)
+      .join(" ");
+    return /audio/i.test(value) ? "audiobook" : "ebook";
+  }
+
+  function selectBestMatch(book, items, minimumScore) {
+    const threshold = minimumScore ?? 0.48;
+    const matches = (items || [])
+      .map((item) => ({ item, score: matchScore(book, item), format: mediaFormat(item) }))
+      .filter(({ score }) => score >= threshold);
+    if (!matches.length) return null;
+
+    const prefersAudio = book?.preferredFormat === "audiobook";
+    const hasAudiobook = prefersAudio && matches.some(({ format }) => format === "audiobook");
+    matches.sort((left, right) => {
+      if (hasAudiobook && left.format !== right.format) return left.format === "audiobook" ? -1 : 1;
+      return right.score - left.score || Number(right.item.isAvailable) - Number(left.item.isAvailable);
+    });
+    return { ...matches[0], isAlternative: prefersAudio && !hasAudiobook && matches[0].format === "ebook" };
+  }
+
   return {
     normalize,
     cleanTitle,
@@ -98,6 +121,8 @@
     matchScore,
     librarySlug,
     libbySearchUrl,
-    statusFor
+    statusFor,
+    mediaFormat,
+    selectBestMatch
   };
 });
