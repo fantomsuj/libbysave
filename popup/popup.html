@@ -9,7 +9,7 @@
   <body>
     <header>
       <div class="brand"><img src="../assets/icons/icon-48.png" alt=""><div><strong>LibbySave</strong><small id="siteLabel">Search from anywhere</small></div></div>
-      <button id="settingsToggle" class="icon-button" aria-label="Settings">⚙</button>
+      <button id="settingsToggle" class="icon-button" aria-label="Settings" aria-controls="setup" aria-expanded="false">⚙</button>
     </header>
     <main>
       <section class="command">
@@ -50,11 +50,18 @@
         </div>
       </section>
       <section id="setup" class="setup hidden">
-        <div class="section-title"><div><small>SETTINGS</small><h2>Your libraries</h2></div></div><div id="libraryRows"></div>
-        <button id="addLibrary" class="quiet full" type="button">+ Add another library</button><label class="field"><span>Default Libby tag</span><input id="targetTag" value="Saved from LibbySave"></label><label class="check"><input id="autoCheck" type="checkbox" checked><span>Show availability automatically on supported pages</span></label><button id="saveSettings" class="primary full" type="button">Save settings</button><p class="hint">Use the first part of your OverDrive URL, e.g. <strong>nypl</strong>.</p>
+        <div class="section-title"><div><small>LIBRARY SETUP</small><h2>Find your library</h2></div></div>
+        <p class="setup-intro">Search by library, city, state, ZIP or OverDrive domain. Add every system where you have a card.</p>
+        <label class="field search-field" for="librarySearch"><span>Library search</span><div class="search-control"><span aria-hidden="true">⌕</span><input id="librarySearch" type="search" autocomplete="off" placeholder="Try Chapel Hill or 28202" role="combobox" aria-autocomplete="list" aria-controls="libraryResults" aria-expanded="false"></div></label>
+        <div id="libraryStatus" class="search-status" role="status" aria-live="polite">Type at least 2 characters to search.</div>
+        <div id="libraryResults" class="library-results hidden" role="listbox" aria-label="Library search results"></div>
+        <div class="selected-heading"><strong>Your libraries</strong><span id="selectedCount">0 selected</span></div>
+        <div id="selectedLibraries" class="selected-libraries"></div>
+        <details class="advanced"><summary>Advanced: enter OverDrive slug manually</summary><label class="field"><span>Display name (optional)</span><input id="manualName" placeholder="My library"></label><label class="field"><span>Slug or OverDrive URL</span><input id="manualSlug" placeholder="nypl or nypl.overdrive.com"></label><button id="addManualLibrary" class="quiet full" type="button">Add manual library</button><p id="manualError" class="field-error" role="alert"></p></details>
+        <label class="field"><span>Default Libby tag</span><input id="targetTag" value="Saved from LibbySave"></label><label class="check"><input id="autoCheck" type="checkbox" checked><span>Show availability automatically on supported pages</span></label><button id="saveSettings" class="primary full" type="button">Done</button>
       </section>
     </main>
     <div id="toast" role="status" aria-live="polite"><span></span><button type="button" class="hidden">Undo</button></div>
-    <script src="../src/shared.js"></script><script src="../src/book-search.js"></script><script src="../src/saved-books.js"></script><script src="../src/search-controller.js"></script><script src="popup.js"></script>
+    <script src="../src/shared.js"></script><script src="../src/library-directory.js"></script><script src="../src/book-search.js"></script><script src="../src/saved-books.js"></script><script src="../src/search-controller.js"></script><script src="popup.js"></script>
   </body>
 </html>
