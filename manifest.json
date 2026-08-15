@@ -1,10 +1,11 @@
 {
   "manifest_version": 3,
   "name": "LibbySave",
-  "version": "0.2.0",
-  "description": "See Libby availability on book lists and save whole lists to a Libby tag.",
+  "version": "0.3.0",
+  "description": "Search, save, and check books across your Libby libraries.",
   "permissions": ["storage"],
   "host_permissions": [
+    "https://openlibrary.org/*",
     "https://thunder.api.overdrive.com/*",
     "https://libbyapp.com/*"
   ],
