@@ -1,8 +1,13 @@
 "use strict";
 
-importScripts("shared.js");
+importScripts("shared.js", "book-search.js", "saved-books.js");
 
 const Shared = globalThis.LibbySaveShared;
+const BookSearch = globalThis.LibbySaveBookSearch;
+const SavedBooks = globalThis.LibbySaveSavedBooks;
+const searchProvider = new BookSearch.OpenLibraryProvider();
+const searchCache = new Map();
+let lastProviderRequestAt = 0;
 const FORMATS = [
   "ebook-overdrive",
   "ebook-media-do",
@@ -11,14 +16,14 @@ const FORMATS = [
   "audiobook-overdrive-provisional"
 ].join(",");
 
-chrome.runtime.onInstalled.addListener(async ({ reason }) => {
-  if (reason !== "install") return;
+chrome.runtime.onInstalled.addListener(async () => {
   const current = await chrome.storage.local.get(["settings"]);
   if (!current.settings) {
     await chrome.storage.local.set({
       settings: { libraries: [], targetTag: "Saved from LibbySave", autoCheck: true }
     });
   }
+  await SavedBooks.read(chrome.storage.local);
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -37,6 +42,24 @@ async function handleMessage(message) {
         key: Shared.bookKey(book),
         libraries: await checkBook(book, message.libraries)
       })) };
+    case "SEARCH_BOOKS":
+      return { ok: true, results: await searchBooks(message.query, message.limit) };
+    case "GET_SAVED_BOOKS":
+      return { ok: true, savedBooks: await SavedBooks.read(chrome.storage.local) };
+    case "SAVE_BOOK": {
+      const saved = await SavedBooks.save(chrome.storage.local, message.book);
+      return { ok: true, item: saved.item, duplicate: saved.duplicate, savedBooks: saved.state };
+    }
+    case "REMOVE_SAVED_BOOK": {
+      const removed = await SavedBooks.remove(chrome.storage.local, message.id);
+      return { ok: true, item: removed.item, savedBooks: removed.state };
+    }
+    case "RESTORE_SAVED_BOOK": {
+      const restored = await SavedBooks.restore(chrome.storage.local, message.id);
+      return { ok: true, item: restored.item, savedBooks: restored.state };
+    }
+    case "ENRICH_SAVED_BOOK":
+      return enrichSavedBook(message.id);
     case "START_IMPORT":
       return startImport(message);
     case "GET_IMPORT":
@@ -57,6 +80,35 @@ async function handleMessage(message) {
       return { ok: true };
     default:
       return null;
+  }
+}
+
+async function searchBooks(query, limit) {
+  const parsed = BookSearch.parseInput(query);
+  if (!parsed.query && !parsed.isbn) return [];
+  const key = Shared.normalize([parsed.kind, parsed.query, parsed.author || ""].join(":"));
+  const cached = searchCache.get(key);
+  if (cached && Date.now() - cached.savedAt < 10 * 60 * 1000) return cached.results;
+  const waitMs = Math.max(0, 1000 - (Date.now() - lastProviderRequestAt));
+  if (waitMs) await wait(waitMs);
+  lastProviderRequestAt = Date.now();
+  const results = await searchProvider.search(query, { limit: limit || 12, offline: globalThis.navigator?.onLine === false });
+  searchCache.set(key, { savedAt: Date.now(), results });
+  if (searchCache.size > 30) searchCache.delete(searchCache.keys().next().value);
+  return results;
+}
+
+async function enrichSavedBook(id) {
+  const state = await SavedBooks.read(chrome.storage.local);
+  const book = state.items.find((item) => item.id === id);
+  if (!book) return { ok: false, error: "Saved book not found." };
+  try {
+    const results = await checkBook(book);
+    const item = await SavedBooks.updateAvailability(chrome.storage.local, id, results);
+    return { ok: true, item, results };
+  } catch (error) {
+    const item = await SavedBooks.updateAvailability(chrome.storage.local, id, [], error.message);
+    return { ok: false, item, error: error.message };
   }
 }
 
@@ -200,4 +252,8 @@ async function mapLimit(items, limit, mapper) {
   }
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
   return output;
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
