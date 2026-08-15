@@ -27,11 +27,13 @@ Source adapters extract title/author pairs and request catalog checks from the s
 
 ### Borrowing and holds
 
-The user must click **Borrow now** or **Place hold** for a specific title and library. LibbySave stores a two-minute, title-specific authorization, opens the exact Libby media page, and clicks only controls matching that authorized action. It never changes the user's default lending period and never borrows or places holds during list imports.
+The user must click **Borrow now** or **Place hold** for a specific title and library. LibbySave stores a 90-second authorization bound to the title, library, media ID, and action. A persisted one-shot transition ledger prevents rerenders or event replay from repeating a completed circulation action. The state machine clicks only an exact authorized control, permits a second click only inside a confirmation dialog, and pauses for sign-in or ambiguity. It never changes the user's default lending period and never borrows or places holds during list imports.
 
 ### Tag imports
 
-The popup sends selected books to a persisted import queue. LibbySave opens searches in the chosen library and attempts to select the configured tag through Libby's visible UI. If that tag is missing, it conservatively attempts to create it through exact **New Tag** and **Create** controls. When the interface is ambiguous or changes, automation pauses and asks the user to finish or skip the current title instead of guessing.
+The popup sends selected books to a persisted import queue. LibbySave opens searches in the chosen library and requires a high-confidence title/author match with a clear margin over alternatives. It selects or creates the configured tag through exact visible controls and advances only after the tag is visibly checked or Libby emits an exact saved status. When the interface is ambiguous or changes, automation pauses and asks the user to finish or skip the current title instead of guessing.
+
+The in-page panel exposes sanitized state, failure code, path, media/library identifiers, and an explanation for the proposed or stopped action. It never includes cookies, storage values, card numbers, credentials, query strings, or session data.
 
 ## Supported sources
 

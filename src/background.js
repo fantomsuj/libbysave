@@ -51,10 +51,15 @@ async function handleMessage(message) {
     case "START_CIRCULATION":
       return startCirculation(message);
     case "GET_CIRCULATION":
-      return { ok: true, pendingCirculation: (await chrome.storage.local.get("pendingCirculation")).pendingCirculation || null };
+      return getCirculation();
+    case "RECORD_CIRCULATION_STEP":
+      return recordCirculationStep(message);
+    case "PAUSE_CIRCULATION":
+      return pauseCirculation(message);
     case "COMPLETE_CIRCULATION":
-      await chrome.storage.local.remove("pendingCirculation");
-      return { ok: true };
+      return completeCirculation(message);
+    case "RECORD_IMPORT_STEP":
+      return recordImportStep(message);
     default:
       return null;
   }
@@ -63,9 +68,11 @@ async function handleMessage(message) {
 async function startCirculation(message) {
   const action = message.action === "borrow" ? "borrow" : message.action === "hold" ? "hold" : null;
   const result = message.result;
-  if (!action || !result?.mediaId || !result?.library?.slug) {
+  const expectedStatus = action === "borrow" ? "available" : "wait";
+  if (!action || !result?.mediaId || !result?.library?.slug || result.status !== expectedStatus) {
     return { ok: false, error: "This title does not have an actionable Libby result." };
   }
+  const now = Date.now();
   const pendingCirculation = {
     id: crypto.randomUUID(),
     action,
@@ -73,13 +80,68 @@ async function startCirculation(message) {
     author: message.book?.author || result.author,
     mediaId: String(result.mediaId),
     librarySlug: result.library.slug,
-    createdAt: Date.now(),
-    expiresAt: Date.now() + 2 * 60 * 1000
+    authorizedMediaTitle: result.title,
+    authorizedMediaAuthor: result.author,
+    status: "authorized",
+    clickedSteps: [],
+    createdAt: now,
+    expiresAt: now + 90 * 1000
   };
   await chrome.storage.local.set({ pendingCirculation });
   const url = result.libbyUrl || `https://libbyapp.com/library/${encodeURIComponent(result.library.slug)}/spotlight-random/page-1/${result.mediaId}`;
   const tab = await chrome.tabs.create({ url, active: true });
   return { ok: true, tabId: tab.id, pendingCirculation };
+}
+
+async function getCirculation() {
+  const stored = await chrome.storage.local.get(["pendingCirculation", "circulationReceipts"]);
+  const pending = stored.pendingCirculation || null;
+  if (pending && pending.expiresAt <= Date.now() && pending.status !== "paused") {
+    pending.status = "paused";
+    pending.failureCode = "AUTH_EXPIRED";
+    await chrome.storage.local.set({ pendingCirculation: pending });
+  }
+  return { ok: true, pendingCirculation: pending, circulationReceipts: stored.circulationReceipts || [] };
+}
+
+async function recordCirculationStep(message) {
+  const allowedSteps = ["circulation-primary", "circulation-confirm"];
+  const stored = await chrome.storage.local.get(["pendingCirculation", "circulationReceipts"]);
+  const pending = stored.pendingCirculation;
+  if (!pending || pending.id !== message.authorizationId) return { ok: false, allowed: false, code: "AUTH_NOT_CURRENT" };
+  if (pending.expiresAt <= Date.now()) return { ok: false, allowed: false, code: "AUTH_EXPIRED" };
+  if (pending.status === "paused") return { ok: false, allowed: false, code: "AUTH_PAUSED" };
+  if ((stored.circulationReceipts || []).some((receipt) => receipt.authorizationId === pending.id && receipt.outcome === "success")) return { ok: false, allowed: false, code: "ALREADY_COMPLETED" };
+  if (!allowedSteps.includes(message.step) || pending.clickedSteps.includes(message.step)) return { ok: false, allowed: false, code: "STEP_ALREADY_USED" };
+  if (message.step === "circulation-confirm" && !pending.clickedSteps.includes("circulation-primary")) return { ok: false, allowed: false, code: "INVALID_STEP_ORDER" };
+  pending.clickedSteps.push(message.step);
+  pending.status = message.step === "circulation-confirm" ? "confirming" : "acting";
+  pending.updatedAt = Date.now();
+  await chrome.storage.local.set({ pendingCirculation: pending });
+  return { ok: true, allowed: true, pendingCirculation: pending };
+}
+
+async function pauseCirculation(message) {
+  const stored = await chrome.storage.local.get("pendingCirculation");
+  const pending = stored.pendingCirculation;
+  if (!pending || pending.id !== message.authorizationId) return { ok: false, code: "AUTH_NOT_CURRENT" };
+  pending.status = "paused";
+  pending.failureCode = String(message.code || "PAUSED").slice(0, 80);
+  pending.updatedAt = Date.now();
+  await chrome.storage.local.set({ pendingCirculation: pending });
+  return { ok: true, pendingCirculation: pending };
+}
+
+async function completeCirculation(message) {
+  const stored = await chrome.storage.local.get(["pendingCirculation", "circulationReceipts"]);
+  const pending = stored.pendingCirculation;
+  if (!pending || pending.id !== message.authorizationId) return { ok: false, code: "AUTH_NOT_CURRENT", circulationReceipts: stored.circulationReceipts || [] };
+  const receipt = { authorizationId: pending.id, action: pending.action, librarySlug: pending.librarySlug, mediaId: pending.mediaId,
+    outcome: ["success", "cancelled"].includes(message.outcome) ? message.outcome : "stopped", code: String(message.code || "").slice(0, 80), completedAt: Date.now() };
+  const receipts = [receipt, ...(stored.circulationReceipts || []).filter((item) => item.authorizationId !== pending.id)].slice(0, 50);
+  await chrome.storage.local.set({ circulationReceipts: receipts });
+  await chrome.storage.local.remove("pendingCirculation");
+  return { ok: true, circulationReceipts: receipts };
 }
 
 async function checkBook(book, suppliedLibraries) {
@@ -142,7 +204,8 @@ async function startImport(message) {
     books,
     results: [],
     startedAt: Date.now(),
-    updatedAt: Date.now()
+    updatedAt: Date.now(),
+    machine: { state: "waiting-for-search-results", clickedSteps: [], code: "IMPORT_STARTED" }
   };
   await chrome.storage.local.set({ importState });
   const tab = await chrome.tabs.create({ url: Shared.libbySearchUrl(slug, books[0]), active: true });
@@ -161,6 +224,7 @@ async function advanceImport(message) {
   });
   state.index += 1;
   state.phase = "search";
+  state.machine = { state: "waiting-for-search-results", clickedSteps: [], code: "NEXT_TITLE" };
   state.updatedAt = Date.now();
   if (state.index >= state.books.length) state.status = "complete";
   await chrome.storage.local.set({ importState: state });
@@ -171,10 +235,27 @@ async function advanceImport(message) {
   };
 }
 
+async function recordImportStep(message) {
+  const stored = await chrome.storage.local.get("importState");
+  const state = stored.importState;
+  const allowedSteps = ["open-title", "open-tags", "select-tag", "open-new-tag", "fill-tag-name", "create-tag"];
+  if (!state || state.id !== message.importId || state.index !== message.index || state.status !== "running") return { ok: false, allowed: false, code: "IMPORT_NOT_CURRENT" };
+  if (!allowedSteps.includes(message.step) || state.machine?.clickedSteps?.includes(message.step)) return { ok: false, allowed: false, code: "IMPORT_STEP_ALREADY_USED" };
+  state.machine = state.machine || { state: "waiting-for-search-results", clickedSteps: [] };
+  state.machine.clickedSteps.push(message.step);
+  state.machine.state = String(message.machineState || "").slice(0, 80);
+  state.machine.code = String(message.code || "").slice(0, 80);
+  state.updatedAt = Date.now();
+  await chrome.storage.local.set({ importState: state });
+  return { ok: true, allowed: true, importState: state };
+}
+
 async function updateImportStatus(status) {
   const stored = await chrome.storage.local.get("importState");
   if (!stored.importState) return { ok: false };
+  if (!["running", "paused"].includes(status)) return { ok: false, error: "Invalid import status." };
   stored.importState.status = status;
+  if (status === "running") stored.importState.machine = { state: "waiting-for-page", clickedSteps: [], code: "USER_RESUMED" };
   stored.importState.updatedAt = Date.now();
   await chrome.storage.local.set({ importState: stored.importState });
   return { ok: true, importState: stored.importState };

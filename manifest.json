@@ -40,7 +40,7 @@
     },
     {
       "matches": ["https://libbyapp.com/*"],
-      "js": ["src/shared.js", "src/content/libby.js"],
+      "js": ["src/shared.js", "src/libby-automation.js", "src/content/libby.js"],
       "css": ["src/content/libby.css"],
       "run_at": "document_idle"
     }
