@@ -2,194 +2,439 @@
   "use strict";
 
   const Shared = globalThis.LibbySaveShared;
-  let settings = { libraries: [], targetTag: "Saved from LibbySave", autoCheck: true };
-  let books = [];
-  const availabilityByKey = new Map();
-
+  const BookSearch = globalThis.LibbySaveBookSearch;
+  const SavedBooks = globalThis.LibbySaveSavedBooks;
+  const Controller = globalThis.LibbySaveSearchController;
   const $ = (selector) => document.querySelector(selector);
-  const libraryRows = $("#libraryRows");
-  const setup = $("#setup");
-  const empty = $("#empty");
-  const booksSection = $("#booksSection");
+  const $$ = (selector) => [...document.querySelectorAll(selector)];
+
+  let settings = { libraries: [], targetTag: "Saved from LibbySave", autoCheck: true };
+  let searchResults = [];
+  let activeResult = -1;
+  let requestNumber = 0;
+  let savedState = { version: SavedBooks.STORAGE_VERSION, items: [] };
+  let pageBooks = [];
+  let batchRows = [];
+  let activeView = "search";
+  let toastTimer = null;
+  const selectedSaved = new Set();
+  const pageAvailability = new Map();
+  const searchLater = Controller.debounce(search, 350);
 
   init();
 
   async function init() {
-    const stored = await chrome.storage.local.get("settings");
+    const [stored, saved] = await Promise.all([
+      chrome.storage.local.get("settings"),
+      chrome.runtime.sendMessage({ type: "GET_SAVED_BOOKS" })
+    ]);
     settings = { ...settings, ...(stored.settings || {}) };
+    savedState = saved?.savedBooks || savedState;
     renderSettings();
+    renderSaved();
     bindEvents();
-    await scanActivePage();
+    scanActivePage();
+    setTimeout(() => $("#bookSearch").focus(), 0);
   }
 
   function bindEvents() {
-    $("#settingsToggle").addEventListener("click", () => setup.classList.toggle("hidden"));
+    $("#bookSearch").addEventListener("input", () => {
+      const query = $("#bookSearch").value.trim();
+      if (query) showView("search");
+      $("#searchStatus").textContent = query.length < 2 ? "Type at least 2 characters." : "Searching…";
+      searchLater(query);
+    });
+    $("#bookSearch").addEventListener("keydown", onSearchKeydown);
+    $("#batchToggle").addEventListener("click", () => showView(activeView === "batch" ? "search" : "batch"));
+    $$(".tab").forEach((tab) => tab.addEventListener("click", () => showView(tab.dataset.view)));
+    $$(".examples button").forEach((button) => button.addEventListener("click", () => {
+      $("#bookSearch").value = button.dataset.query;
+      $("#bookSearch").dispatchEvent(new Event("input", { bubbles: true }));
+      $("#bookSearch").focus();
+    }));
+    $("#settingsToggle").addEventListener("click", () => $("#setup").classList.toggle("hidden"));
     $("#addLibrary").addEventListener("click", () => addLibraryRow({ name: "", slug: "" }));
     $("#saveSettings").addEventListener("click", saveSettings);
-    $("#checkAll").addEventListener("click", checkAll);
-    $("#importAll").addEventListener("click", importAll);
+    $("#reviewBatch").addEventListener("click", reviewBatch);
+    $("#saveBatch").addEventListener("click", saveBatch);
+    $$(".filters input").forEach((input) => input.addEventListener("change", renderSaved));
+    $("#refreshSaved").addEventListener("click", refreshVisibleSaved);
+    $("#importSaved").addEventListener("click", importSaved);
+    $("#checkAll").addEventListener("click", checkAllPage);
+    $("#importAll").addEventListener("click", importPage);
+  }
+
+  async function search(query) {
+    const current = ++requestNumber;
+    if (query.length < 2) {
+      searchResults = [];
+      renderSearchResults();
+      $("#searchStatus").textContent = query ? "Type at least 2 characters." : "Type to find and save a book.";
+      return;
+    }
+    $("#bookSearch").setAttribute("aria-busy", "true");
+    try {
+      const response = await chrome.runtime.sendMessage({ type: "SEARCH_BOOKS", query, limit: 12 });
+      if (current !== requestNumber) return;
+      if (!response?.ok) throw new Error(response?.error || "Search failed.");
+      searchResults = response.results || [];
+      activeResult = searchResults.length ? 0 : -1;
+      renderSearchResults();
+      const parsed = BookSearch.parseInput(query);
+      $("#searchStatus").textContent = searchResults.length
+        ? (parsed.recognizedUrl ? "Book link recognized. Review the match." : searchResults.length + " matches")
+        : (parsed.recognizedUrl && !parsed.query ? "This link hides its title. Open it and search the visible title." : "No matches. Try a title plus author or ISBN.");
+    } catch (error) {
+      if (current !== requestNumber) return;
+      searchResults = [];
+      renderSearchResults();
+      $("#searchStatus").textContent = /rate/i.test(error.message) ? "Search is rate limited. Try again in a moment." : /offline/i.test(error.message) ? "Offline. Saved books are still available." : error.message;
+    } finally {
+      if (current === requestNumber) $("#bookSearch").removeAttribute("aria-busy");
+    }
+  }
+
+  function onSearchKeydown(event) {
+    const action = Controller.keyboardAction(event.key, activeResult, searchResults.length, Boolean($("#bookSearch").value));
+    if (action.type === "none") return;
+    event.preventDefault();
+    if (action.type === "move") {
+      activeResult = action.index;
+      renderSearchResults();
+      document.querySelector(".result.active")?.scrollIntoView({ block: "nearest" });
+    }
+    if (action.type === "save") saveSearchResult(searchResults[action.index]);
+    if (action.type === "clear") {
+      $("#bookSearch").value = "";
+      searchResults = [];
+      activeResult = -1;
+      renderSearchResults();
+      $("#searchStatus").textContent = "Type to find and save a book.";
+    }
+    if (action.type === "close") window.close();
+  }
+
+  function renderSearchResults() {
+    const list = $("#searchResults");
+    $("#bookSearch").setAttribute("aria-expanded", String(Boolean(searchResults.length)));
+    list.classList.toggle("hidden", !searchResults.length);
+    list.innerHTML = searchResults.map((book, index) => {
+      const saved = savedState.items.some((item) => !item.removedAt && SavedBooks.sameBook(item, book));
+      const review = book.confidence === "review" ? '<span class="confidence review">Review</span>' : "";
+      return '<div class="result ' + (index === activeResult ? "active" : "") + '" data-index="' + index + '" role="option" aria-selected="' + String(index === activeResult) + '">' +
+        cover(book) + '<div class="result-copy"><span class="result-title">' + escapeHtml(book.title) + review + '</span><span class="result-meta">' + escapeHtml(book.authors?.join(", ") || book.author) + '</span><span class="result-edition">' + escapeHtml([book.edition, formatLabel(book.formats), book.editionCount > 1 ? book.editionCount + " editions" : ""].filter(Boolean).join(" · ")) + '</span></div>' +
+        '<button class="result-action ' + (saved ? "saved" : "") + '" data-save="' + index + '" type="button">' + (saved ? "Saved" : "Save") + "</button></div>";
+    }).join("");
+    $$(".result").forEach((row) => row.addEventListener("mousemove", () => {
+      activeResult = Number(row.dataset.index);
+      $$(".result").forEach((candidate, index) => candidate.classList.toggle("active", index === activeResult));
+    }));
+    $$("[data-save]").forEach((button) => button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      saveSearchResult(searchResults[Number(button.dataset.save)]);
+    }));
+  }
+
+  async function saveSearchResult(book) {
+    if (!book) return;
+    const response = await chrome.runtime.sendMessage({ type: "SAVE_BOOK", book: { ...book, savedAt: new Date().toISOString(), enrichmentState: "pending" } });
+    if (!response?.ok) return toast(response?.error || "Couldn’t save this book.");
+    savedState = response.savedBooks;
+    renderSaved();
+    renderSearchResults();
+    if (response.duplicate) {
+      toast("Already in Saved.");
+      return;
+    }
+    toast("Saved " + response.item.title, {
+      label: "Undo",
+      action: async () => {
+        const undone = await chrome.runtime.sendMessage({ type: "REMOVE_SAVED_BOOK", id: response.item.id });
+        savedState = undone.savedBooks;
+        renderSaved();
+        renderSearchResults();
+      }
+    });
+    enrich(response.item.id);
+  }
+
+  async function enrich(id) {
+    const response = await chrome.runtime.sendMessage({ type: "ENRICH_SAVED_BOOK", id });
+    if (response?.item) {
+      const index = savedState.items.findIndex((item) => item.id === id);
+      if (index >= 0) savedState.items[index] = response.item;
+      renderSaved();
+    }
+  }
+
+  function showView(view) {
+    activeView = view;
+    ["search", "batch", "saved", "page"].forEach((name) => $("#" + name + "View").classList.toggle("hidden", name !== view));
+    $$(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.view === view));
+    $("#batchToggle").textContent = view === "batch" ? "Back to search" : "Paste a list";
+    if (view === "search") $("#bookSearch").focus();
+  }
+
+  async function reviewBatch() {
+    const lines = BookSearch.parseMultiline($("#batchInput").value);
+    batchRows = [];
+    $("#batchResults").innerHTML = "";
+    $("#saveBatch").classList.add("hidden");
+    if (!lines.length) {
+      $("#batchStatus").textContent = "Paste at least one book.";
+      return;
+    }
+    $("#reviewBatch").disabled = true;
+    for (let index = 0; index < lines.length; index += 1) {
+      $("#batchStatus").textContent = "Matching " + (index + 1) + " of " + lines.length + "…";
+      try {
+        const response = await chrome.runtime.sendMessage({ type: "SEARCH_BOOKS", query: lines[index].line, limit: 5 });
+        const match = response?.results?.[0] || null;
+        batchRows.push({ ...lines[index], match, confirmed: Boolean(match && match.confidence !== "review") });
+      } catch (error) {
+        batchRows.push({ ...lines[index], match: null, confirmed: false, error: error.message });
+      }
+      renderBatch();
+    }
+    $("#reviewBatch").disabled = false;
+    $("#batchStatus").textContent = "Review every proposed match. Ambiguous matches start unchecked.";
+    $("#saveBatch").classList.toggle("hidden", !batchRows.some((row) => row.match));
+  }
+
+  function renderBatch() {
+    $("#batchResults").innerHTML = batchRows.map((row, index) => {
+      if (!row.match) return '<article class="batch-card review"><input type="checkbox" disabled><div><strong>' + escapeHtml(row.line) + '</strong><p class="book-author">' + escapeHtml(row.error || "No confident match. Edit this line and try again.") + "</p></div></article>";
+      return '<article class="batch-card ' + (row.match.confidence === "review" ? "review" : "") + '"><input type="checkbox" data-batch="' + index + '" ' + (row.confirmed ? "checked" : "") + ' aria-label="Confirm ' + escapeAttr(row.match.title) + '"><div><strong>' + escapeHtml(row.match.title) + '</strong><p class="book-author">' + escapeHtml(row.match.author) + " · " + escapeHtml(row.match.edition) + (row.match.confidence === "review" ? " · Review required" : "") + "</p></div></article>";
+    }).join("");
+    $$("[data-batch]").forEach((input) => input.addEventListener("change", () => { batchRows[Number(input.dataset.batch)].confirmed = input.checked; }));
+  }
+
+  async function saveBatch() {
+    const confirmed = batchRows.filter((row) => row.confirmed && row.match);
+    if (!confirmed.length) return toast("Confirm at least one match.");
+    $("#saveBatch").disabled = true;
+    let saved = 0;
+    for (const row of confirmed) {
+      const response = await chrome.runtime.sendMessage({ type: "SAVE_BOOK", book: row.match });
+      if (response?.ok) {
+        savedState = response.savedBooks;
+        saved += Number(!response.duplicate);
+        if (!response.duplicate) enrich(response.item.id);
+      }
+    }
+    $("#saveBatch").disabled = false;
+    renderSaved();
+    toast(saved + " book" + (saved === 1 ? "" : "s") + " saved.");
+    showView("saved");
+  }
+
+  function renderSaved() {
+    const filters = Object.fromEntries($$(".filters input").map((input) => [input.dataset.filter, input.checked]));
+    const visible = SavedBooks.filterItems(savedState.items, filters);
+    const active = savedState.items.filter((item) => !item.removedAt);
+    $("#savedCount").textContent = String(active.length);
+    $("#savedList").innerHTML = visible.length ? visible.map(savedCard).join("") : '<div class="empty compact"><h2>No saved books here</h2><p>Search above and press Enter to save your first book.</p></div>';
+    $$("[data-select-saved]").forEach((input) => input.addEventListener("change", () => {
+      if (input.checked) selectedSaved.add(input.dataset.selectSaved); else selectedSaved.delete(input.dataset.selectSaved);
+      renderSavedImport();
+    }));
+    $$("[data-remove]").forEach((button) => button.addEventListener("click", () => removeSaved(button.dataset.remove)));
+    $$("[data-restore]").forEach((button) => button.addEventListener("click", () => restoreSaved(button.dataset.restore)));
+    $$("[data-refresh]").forEach((button) => button.addEventListener("click", () => enrich(button.dataset.refresh)));
+    $$("[data-circulate]").forEach((button) => button.addEventListener("click", () => circulateSaved(button)));
+    renderSavedImport();
+  }
+
+  function savedCard(book) {
+    const results = book.availability || [];
+    return '<article class="book-card ' + (book.removedAt ? "removed" : "") + '"><div class="book-main">' +
+      '<input class="book-select" type="checkbox" data-select-saved="' + escapeAttr(book.id) + '" ' + (selectedSaved.has(book.id) ? "checked" : "") + " " + (book.removedAt ? "disabled" : "") + ' aria-label="Select ' + escapeAttr(book.title) + '">' +
+      cover(book) + '<div class="book-copy"><h3 class="book-title">' + escapeHtml(book.title) + '</h3><p class="book-author">' + escapeHtml(book.author || "Author unknown") + '</p><p class="book-author">' + escapeHtml([book.edition, formatLabel(book.formats)].filter(Boolean).join(" · ")) + "</p>" +
+      '<div class="book-links">' + externalLink(book.canonicalUrl || book.sourceUrls?.[0], "Book page") + externalLink(book.selectedLibbyMatch?.libbyUrl, "Open in Libby") + "</div></div></div>" +
+      '<div class="availability-list">' + (book.enrichmentState === "pending" ? '<span class="book-author">Checking your libraries…</span>' : availabilityRows(results, book.id)) + "</div>" +
+      '<div class="book-actions"><button data-refresh="' + escapeAttr(book.id) + '">Refresh availability</button>' + (book.removedAt ? '<button data-restore="' + escapeAttr(book.id) + '">Restore</button>' : '<button data-remove="' + escapeAttr(book.id) + '">Remove</button>') + "</div></article>";
+  }
+
+  function availabilityRows(results, id) {
+    if (!results.length) return '<span class="book-author">No library match yet.</span>';
+    return results.map((result, index) => {
+      const action = result.status === "available" ? "borrow" : result.status === "wait" ? "hold" : "";
+      return '<div class="availability ' + escapeAttr(result.status) + '"><i class="dot"></i><span><strong>' + escapeHtml(result.library?.name || result.library?.slug || "Library") + "</strong> · " + escapeHtml(availabilityText(result)) + '</span>' + (action ? '<button class="circulate" data-circulate="' + action + '" data-book="' + escapeAttr(id) + '" data-result="' + index + '">' + (action === "borrow" ? "Borrow" : "Hold") + "</button>" : "") + "</div>";
+    }).join("");
+  }
+
+  async function removeSaved(id) {
+    const response = await chrome.runtime.sendMessage({ type: "REMOVE_SAVED_BOOK", id });
+    savedState = response.savedBooks;
+    selectedSaved.delete(id);
+    renderSaved();
+    renderSearchResults();
+    toast("Removed from Saved.", { label: "Undo", action: () => restoreSaved(id) });
+  }
+
+  async function restoreSaved(id) {
+    const response = await chrome.runtime.sendMessage({ type: "RESTORE_SAVED_BOOK", id });
+    savedState = response.savedBooks;
+    renderSaved();
+    renderSearchResults();
+    toast("Restored to Saved.");
+  }
+
+  async function refreshVisibleSaved() {
+    const ids = $$("#savedList [data-refresh]").map((button) => button.dataset.refresh);
+    $("#refreshSaved").textContent = "Refreshing…";
+    await Promise.all(ids.map(enrich));
+    $("#refreshSaved").textContent = "Refresh";
+  }
+
+  function renderSavedImport() {
+    const count = [...selectedSaved].filter((id) => savedState.items.some((item) => item.id === id && !item.removedAt)).length;
+    $("#selectedSavedCount").textContent = String(count);
+    $("#savedImport").classList.toggle("hidden", count === 0);
+  }
+
+  async function importSaved() {
+    const books = savedState.items.filter((item) => selectedSaved.has(item.id) && !item.removedAt);
+    const response = await chrome.runtime.sendMessage({ type: "START_IMPORT", books, targetTag: $("#savedImportTag").value.trim() || settings.targetTag, librarySlug: $("#savedImportLibrary").value });
+    if (!response?.ok) toast(response?.error || "Couldn’t start tag import.");
+  }
+
+  async function circulateSaved(button) {
+    const book = savedState.items.find((item) => item.id === button.dataset.book);
+    const result = book?.availability?.[Number(button.dataset.result)];
+    if (!book || !result) return;
+    if (!window.confirm((button.dataset.circulate === "borrow" ? "Borrow " : "Place a hold on ") + book.title + " through " + (result.library?.name || result.library?.slug || "this library") + "?")) return;
+    button.disabled = true;
+    button.textContent = "Opening…";
+    const response = await chrome.runtime.sendMessage({ type: "START_CIRCULATION", action: button.dataset.circulate, book, result });
+    if (!response?.ok) {
+      button.disabled = false;
+      button.textContent = button.dataset.circulate === "borrow" ? "Borrow" : "Hold";
+      toast(response?.error || "Couldn’t open Libby.");
+    }
   }
 
   async function scanActivePage() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     try {
       const response = await chrome.tabs.sendMessage(tab.id, { type: "SCAN_PAGE" });
-      books = response?.books || [];
-      $("#siteLabel").textContent = response?.site || "Book lists → Libby";
+      pageBooks = response?.books || [];
+      $("#siteLabel").textContent = response?.site || "Search from anywhere";
     } catch (_) {
-      books = [];
+      pageBooks = [];
     }
-    if (!settings.libraries.length) setup.classList.remove("hidden");
-    if (!books.length) {
-      empty.classList.remove("hidden");
-      booksSection.classList.add("hidden");
-      return;
+    $("#pageCount").textContent = String(pageBooks.length);
+    $("#bookCount").textContent = String(pageBooks.length);
+    $("#pageEmpty").classList.toggle("hidden", Boolean(pageBooks.length));
+    $("#booksSection").classList.toggle("hidden", !pageBooks.length);
+    renderPageBooks();
+  }
+
+  function renderPageBooks() {
+    $("#bookList").innerHTML = pageBooks.map((book, index) => '<article class="book-card" data-index="' + index + '"><div class="book-main"><input class="book-select" type="checkbox" checked aria-label="Include ' + escapeAttr(book.title) + '"><div class="cover-placeholder">L</div><div class="book-copy"><h3 class="book-title">' + escapeHtml(book.title) + '</h3><p class="book-author">' + escapeHtml(book.author || "Author unknown") + '</p></div></div><div class="availability-list" data-key="' + escapeAttr(Shared.bookKey(book)) + '"><span class="book-author">Not checked yet</span></div></article>').join("");
+  }
+
+  async function checkAllPage() {
+    if (!settings.libraries.length) {
+      $("#setup").classList.remove("hidden");
+      return toast("Add your library first.");
     }
-    empty.classList.add("hidden");
-    booksSection.classList.remove("hidden");
-    $("#bookCount").textContent = String(books.length);
-    renderBooks();
+    $("#checkAll").textContent = "Checking…";
+    const response = await chrome.runtime.sendMessage({ type: "CHECK_BOOKS", books: pageBooks, libraries: settings.libraries });
+    (response?.results || []).forEach((entry) => {
+      pageAvailability.set(entry.key, entry.libraries || []);
+      const container = $$(".availability-list").find((node) => node.dataset.key === entry.key);
+      if (container) {
+        const book = pageBooks.find((candidate) => Shared.bookKey(candidate) === entry.key);
+        container.innerHTML = pageAvailabilityRows(entry.libraries || [], entry.key);
+        container.querySelectorAll("[data-page-circulate]").forEach((button) => button.addEventListener("click", () => {
+          const result = (pageAvailability.get(entry.key) || [])[Number(button.dataset.result)];
+          if (!window.confirm((button.dataset.pageCirculate === "borrow" ? "Borrow " : "Place a hold on ") + book.title + " through " + (result.library?.name || result.library?.slug || "this library") + "?")) return;
+          chrome.runtime.sendMessage({ type: "START_CIRCULATION", action: button.dataset.pageCirculate, book, result }).then((reply) => {
+            if (!reply?.ok) toast(reply?.error || "Couldn’t open Libby.");
+          });
+        }));
+      }
+    });
+    const all = [...pageAvailability.values()].flat();
+    $("#summary").innerHTML = "<strong>" + all.filter((item) => item.status === "available").length + "</strong> available now · <strong>" + all.filter((item) => item.status === "wait").length + "</strong> with a wait";
+    $("#checkAll").textContent = "Check again";
+  }
+
+  function importPage() {
+    const books = $$("#bookList .book-card").filter((card) => card.querySelector(".book-select").checked).map((card) => pageBooks[Number(card.dataset.index)]);
+    chrome.runtime.sendMessage({ type: "START_IMPORT", books, targetTag: $("#importTag").value.trim() || settings.targetTag, librarySlug: $("#importLibrary").value }).then((response) => { if (!response?.ok) toast(response?.error || "Couldn’t start import."); });
   }
 
   function renderSettings() {
-    libraryRows.innerHTML = "";
-    const rows = settings.libraries.length ? settings.libraries : [{ name: "", slug: "" }];
-    rows.forEach(addLibraryRow);
+    $("#libraryRows").innerHTML = "";
+    (settings.libraries.length ? settings.libraries : [{ name: "", slug: "" }]).forEach(addLibraryRow);
     $("#targetTag").value = settings.targetTag;
     $("#importTag").value = settings.targetTag;
+    $("#savedImportTag").value = settings.targetTag;
     $("#autoCheck").checked = settings.autoCheck !== false;
-    renderLibrarySelect();
+    renderLibrarySelects();
   }
 
   function addLibraryRow(library) {
     const row = document.createElement("div");
     row.className = "library-row";
-    row.innerHTML = `<input data-field="name" aria-label="Library name" placeholder="NYPL" value="${escapeAttr(library.name || "")}"><input data-field="slug" aria-label="OverDrive slug" placeholder="nypl" value="${escapeAttr(library.slug || "")}"><button aria-label="Remove library">×</button>`;
+    row.innerHTML = '<input data-field="name" aria-label="Library name" placeholder="NYPL" value="' + escapeAttr(library.name || "") + '"><input data-field="slug" aria-label="OverDrive slug" placeholder="nypl" value="' + escapeAttr(library.slug || "") + '"><button aria-label="Remove library">×</button>';
     row.querySelector("button").addEventListener("click", () => row.remove());
-    libraryRows.appendChild(row);
+    $("#libraryRows").appendChild(row);
   }
 
   async function saveSettings() {
-    const libraries = [...libraryRows.querySelectorAll(".library-row")]
-      .map((row) => ({
-        name: row.querySelector("[data-field='name']").value.trim(),
-        slug: Shared.librarySlug(row.querySelector("[data-field='slug']").value)
-      }))
-      .filter((library) => library.slug)
-      .map((library) => ({ ...library, name: library.name || library.slug }));
-    settings = {
-      libraries,
-      targetTag: $("#targetTag").value.trim() || "Saved from LibbySave",
-      autoCheck: $("#autoCheck").checked
-    };
+    const libraries = $$(".library-row").map((row) => ({ name: row.querySelector("[data-field=name]").value.trim(), slug: Shared.librarySlug(row.querySelector("[data-field=slug]").value) })).filter((library) => library.slug).map((library) => ({ ...library, name: library.name || library.slug }));
+    settings = { ...settings, libraries, targetTag: $("#targetTag").value.trim() || "Saved from LibbySave", autoCheck: $("#autoCheck").checked };
     await chrome.storage.local.set({ settings });
     $("#importTag").value = settings.targetTag;
-    renderLibrarySelect();
-    setup.classList.add("hidden");
-    toast("Settings saved");
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    chrome.tabs.sendMessage(tab.id, { type: "REFRESH_INLINE" }).catch(() => {});
+    $("#savedImportTag").value = settings.targetTag;
+    renderLibrarySelects();
+    $("#setup").classList.add("hidden");
+    toast("Settings saved.");
   }
 
-  function renderLibrarySelect() {
-    const select = $("#importLibrary");
-    select.innerHTML = settings.libraries.length
-      ? settings.libraries.map((library) => `<option value="${escapeAttr(library.slug)}">${escapeHtml(library.name)}</option>`).join("")
-      : `<option value="">Add a library first</option>`;
-  }
-
-  function renderBooks() {
-    const list = $("#bookList");
-    list.innerHTML = books.map((book, index) => {
-      const key = Shared.bookKey(book);
-      return `<article class="book-card" data-index="${index}"><div class="book-top"><div><h3 class="book-title">${escapeHtml(book.title)}</h3><p class="book-author">${escapeHtml(book.author || "Author unknown")}</p></div><input class="book-select" type="checkbox" checked aria-label="Include ${escapeAttr(book.title)}"></div><div class="availability-list" data-key="${escapeAttr(key)}"><span class="book-author">Not checked yet</span></div></article>`;
-    }).join("");
-  }
-
-  async function checkAll() {
-    if (!settings.libraries.length) {
-      setup.classList.remove("hidden");
-      toast("Add your library first");
-      return;
-    }
-    $("#checkAll").textContent = "Checking…";
-    const response = await chrome.runtime.sendMessage({ type: "CHECK_BOOKS", books, libraries: settings.libraries });
-    (response?.results || []).forEach((entry) => {
-      availabilityByKey.set(entry.key, entry.libraries || []);
-      renderAvailability(entry.key, entry.libraries || []);
-    });
-    summarize();
-    $("#checkAll").textContent = "Check again";
-  }
-
-  function renderAvailability(key, results) {
-    const container = [...document.querySelectorAll(".availability-list")].find((node) => node.dataset.key === key);
-    if (!container) return;
-    const book = books.find((candidate) => Shared.bookKey(candidate) === key);
-    container.innerHTML = results.map((result) => {
-      const name = result.library?.name || result.library?.slug || "Library";
-      const detail = availabilityText(result);
-      const action = result.status === "available" ? "borrow" : result.status === "wait" ? "hold" : "";
-      const button = action ? `<button data-action="${action}" data-key="${escapeAttr(key)}" data-library="${escapeAttr(result.library.slug)}">${action === "borrow" ? "Borrow now" : "Place hold"}</button>` : "";
-      return `<div class="availability ${escapeAttr(result.status)}"><i class="dot"></i><span><strong>${escapeHtml(name)}</strong> · ${escapeHtml(detail)}</span>${button}</div>`;
-    }).join("") || `<span class="book-author">No library results</span>`;
-    container.querySelectorAll("button[data-action]").forEach((button) => button.addEventListener("click", () => circulate(button, book, results)));
-  }
-
-  async function circulate(button, book, results) {
-    const result = results.find((candidate) => candidate.library?.slug === button.dataset.library);
-    button.disabled = true;
-    button.textContent = button.dataset.action === "borrow" ? "Opening Libby…" : "Opening Libby…";
-    const response = await chrome.runtime.sendMessage({ type: "START_CIRCULATION", action: button.dataset.action, book, result });
-    if (!response?.ok) {
-      button.disabled = false;
-      button.textContent = button.dataset.action === "borrow" ? "Borrow now" : "Place hold";
-      toast(response?.error || "Couldn’t open Libby");
-    }
+  function renderLibrarySelects() {
+    const options = settings.libraries.length ? settings.libraries.map((library) => '<option value="' + escapeAttr(library.slug) + '">' + escapeHtml(library.name) + "</option>").join("") : '<option value="">Add a library first</option>';
+    $("#importLibrary").innerHTML = options;
+    $("#savedImportLibrary").innerHTML = options;
   }
 
   function availabilityText(result) {
-    if (result.status === "available") return result.isAlternative ? "Ebook available as an alternative" : `${result.format === "audiobook" ? "Audiobook" : "Ebook"} available now`;
-    if (result.status === "wait") {
-      const wait = result.estimatedWaitDays ? `about ${Math.max(1, Math.ceil(result.estimatedWaitDays / 7))} week wait` : `${result.holdsCount || ""} holds`.trim();
-      return `${result.format === "audiobook" ? "Audiobook" : "Ebook"} · ${wait}`;
-    }
-    if (result.status === "notify") return "not owned · Notify Me";
-    if (result.status === "error") return result.error || "couldn’t check";
-    return "not found";
+    if (result.status === "available") return (result.format === "audiobook" ? "Audiobook" : "Ebook") + " available now";
+    if (result.status === "wait") return (result.format === "audiobook" ? "Audiobook" : "Ebook") + " · " + (result.estimatedWaitDays ? "about " + Math.max(1, Math.ceil(result.estimatedWaitDays / 7)) + " week wait" : (result.holdsCount || "") + " holds");
+    if (result.status === "notify") return "Not owned · Notify Me";
+    if (result.status === "error") return result.error || "Couldn’t check";
+    return "Not owned";
   }
 
-  function summarize() {
-    const all = [...availabilityByKey.values()].flat();
-    const available = all.filter((result) => result.status === "available").length;
-    const wait = all.filter((result) => result.status === "wait").length;
-    $("#summary").innerHTML = `<strong>${available}</strong> available now · <strong>${wait}</strong> with a wait`;
+  function pageAvailabilityRows(results, key) {
+    if (!results.length) return '<span class="book-author">No library match yet.</span>';
+    return results.map((result, index) => {
+      const action = result.status === "available" ? "borrow" : result.status === "wait" ? "hold" : "";
+      return '<div class="availability ' + escapeAttr(result.status) + '"><i class="dot"></i><span><strong>' + escapeHtml(result.library?.name || result.library?.slug || "Library") + "</strong> · " + escapeHtml(availabilityText(result)) + '</span>' + (action ? '<button data-page-circulate="' + action + '" data-key="' + escapeAttr(key) + '" data-result="' + index + '">' + (action === "borrow" ? "Borrow" : "Hold") + "</button>" : "") + "</div>";
+    }).join("");
   }
 
-  async function importAll() {
-    const selected = [...document.querySelectorAll(".book-card")]
-      .filter((card) => card.querySelector(".book-select").checked)
-      .map((card) => books[Number(card.dataset.index)]);
-    const response = await chrome.runtime.sendMessage({
-      type: "START_IMPORT",
-      books: selected,
-      targetTag: $("#importTag").value.trim() || settings.targetTag,
-      librarySlug: $("#importLibrary").value
-    });
-    if (!response?.ok) toast(response?.error || "Couldn’t start import");
+  function cover(book) {
+    return book.coverUrl ? '<img class="cover" src="' + escapeAttr(book.coverUrl) + '" alt="" loading="lazy">' : '<div class="cover-placeholder">L</div>';
   }
+  function formatLabel(formats) { return (formats || []).map((value) => value.charAt(0).toUpperCase() + value.slice(1)).join(", "); }
+  function externalLink(url, label) { return url ? '<a href="' + escapeAttr(url) + '" target="_blank" rel="noreferrer">' + escapeHtml(label) + "</a>" : ""; }
 
-  function toast(message) {
+  function toast(message, undo) {
+    clearTimeout(toastTimer);
     const node = $("#toast");
-    node.textContent = message;
+    node.querySelector("span").textContent = message;
+    const button = node.querySelector("button");
+    button.classList.toggle("hidden", !undo);
+    button.textContent = undo?.label || "Undo";
+    button.onclick = undo ? async () => { await undo.action(); hideToast(); } : null;
     node.classList.add("show");
-    setTimeout(() => node.classList.remove("show"), 2200);
+    toastTimer = setTimeout(hideToast, undo ? 5000 : 2500);
   }
-
-  function escapeHtml(value) {
-    const div = document.createElement("div");
-    div.textContent = String(value || "");
-    return div.innerHTML;
-  }
+  function hideToast() { $("#toast").classList.remove("show"); }
+  function escapeHtml(value) { const div = document.createElement("div"); div.textContent = String(value || ""); return div.innerHTML; }
   function escapeAttr(value) { return escapeHtml(value).replace(/"/g, "&quot;"); }
 })();
