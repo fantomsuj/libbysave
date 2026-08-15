@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>LibbySave</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <header>
+      <div class="brand"><img src="../assets/icons/icon-48.png" alt=""><div><strong>LibbySave</strong><small id="siteLabel">Book lists → Libby</small></div></div>
+      <button id="settingsToggle" class="icon-button" aria-label="Settings">⚙</button>
+    </header>
+
+    <main>
+      <section id="setup" class="setup hidden">
+        <div class="section-title"><div><small>YOUR LIBRARIES</small><h2>Where do you read?</h2></div></div>
+        <div id="libraryRows"></div>
+        <button id="addLibrary" class="quiet full">+ Add another library</button>
+        <label class="field"><span>Default Libby tag</span><input id="targetTag" value="Saved from LibbySave"></label>
+        <label class="check"><input id="autoCheck" type="checkbox" checked><span>Show availability automatically on supported pages</span></label>
+        <button id="saveSettings" class="primary full">Save settings</button>
+        <p class="hint">Use the first part of your OverDrive URL, e.g. <strong>nypl</strong> from nypl.overdrive.com.</p>
+      </section>
+
+      <section id="empty" class="empty hidden">
+        <div class="empty-art">L</div>
+        <h2>Open a book list</h2>
+        <p>LibbySave currently recognizes New York Times Best Sellers and Goodreads pages.</p>
+      </section>
+
+      <section id="booksSection" class="hidden">
+        <div class="section-title">
+          <div><small>FOUND ON THIS PAGE</small><h2><span id="bookCount">0</span> books</h2></div>
+          <button id="checkAll" class="quiet">Check all</button>
+        </div>
+        <div class="summary" id="summary"><span>Check availability across your libraries.</span></div>
+        <div id="bookList" class="book-list"></div>
+        <div class="import-box">
+          <label class="field"><span>Save list to tag</span><input id="importTag"></label>
+          <div class="import-row"><select id="importLibrary" aria-label="Import library"></select><button id="importAll" class="primary">Send to Libby</button></div>
+          <small>Opens Libby and saves each match. Borrowing and holds always require their own explicit click.</small>
+        </div>
+      </section>
+    </main>
+
+    <div id="toast" role="status"></div>
+    <script src="../src/shared.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>
