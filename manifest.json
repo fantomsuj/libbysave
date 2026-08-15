@@ -1,0 +1,47 @@
+{
+  "manifest_version": 3,
+  "name": "LibbySave",
+  "version": "0.1.0",
+  "description": "See Libby availability on book lists and save whole lists to a Libby tag.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://thunder.api.overdrive.com/*",
+    "https://libbyapp.com/*"
+  ],
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "icons": {
+    "16": "assets/icons/icon-16.png",
+    "32": "assets/icons/icon-32.png",
+    "48": "assets/icons/icon-48.png",
+    "128": "assets/icons/icon-128.png"
+  },
+  "action": {
+    "default_title": "LibbySave",
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "assets/icons/icon-16.png",
+      "32": "assets/icons/icon-32.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.nytimes.com/*",
+        "https://nytimes.com/*",
+        "https://www.goodreads.com/*",
+        "https://goodreads.com/*"
+      ],
+      "js": ["src/shared.js", "src/content/book-sites.js"],
+      "css": ["src/content/book-sites.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://libbyapp.com/*"],
+      "js": ["src/shared.js", "src/content/libby.js"],
+      "css": ["src/content/libby.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}
