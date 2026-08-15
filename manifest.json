@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "LibbySave",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Search, save, and check books across your Libby libraries.",
   "permissions": ["storage"],
   "host_permissions": [

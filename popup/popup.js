@@ -85,7 +85,12 @@
     try {
       const response = await chrome.runtime.sendMessage({ type: "SEARCH_BOOKS", query, limit: 12 });
       if (current !== requestNumber) return;
-      if (!response?.ok) throw new Error(response?.error || "Search failed.");
+      if (!response?.ok) {
+        const error = new Error(response?.error || "Search failed.");
+        error.code = response?.errorCode || "unexpected-error";
+        error.retryAfter = response?.retryAfter || null;
+        throw error;
+      }
       searchResults = response.results || [];
       activeResult = searchResults.length ? 0 : -1;
       renderSearchResults();
@@ -97,7 +102,9 @@
       if (current !== requestNumber) return;
       searchResults = [];
       renderSearchResults();
-      $("#searchStatus").textContent = /rate/i.test(error.message) ? "Search is rate limited. Try again in a moment." : /offline/i.test(error.message) ? "Offline. Saved books are still available." : error.message;
+      $("#searchStatus").textContent = error.code === "rate-limited"
+        ? "Search is rate limited. Try again in a moment."
+        : error.message;
     } finally {
       if (current === requestNumber) $("#bookSearch").removeAttribute("aria-busy");
     }
