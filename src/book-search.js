@@ -24,14 +24,16 @@
 
   class OpenLibraryProvider {
     constructor(options) {
-      this.fetchImpl = options?.fetchImpl || globalThis.fetch;
+      this.fetchImpl = options?.fetchImpl || globalThis.fetch?.bind(globalThis);
       this.endpoint = options?.endpoint || SEARCH_ENDPOINT;
     }
 
     async search(rawInput, options) {
       const parsed = parseInput(rawInput);
       if (!parsed.query && !parsed.isbn) return [];
-      if (options?.offline) throw new ProviderError("You appear to be offline.", "offline");
+      if (typeof this.fetchImpl !== "function") {
+        throw new ProviderError("Book search is unavailable in this browser context.", "provider-unavailable");
+      }
       const params = new URLSearchParams({
         limit: String(Math.min(Math.max(options?.limit || 12, 1), 20)),
         lang: options?.language || "en",
@@ -57,14 +59,22 @@
         });
       } catch (error) {
         if (error?.name === "AbortError") throw error;
-        throw new ProviderError("Book search is unavailable while offline.", "offline");
+        throw new ProviderError("Couldn't reach Open Library. Check your connection and try again.", "network-error");
       }
       if (response.status === 429) {
         throw new ProviderError("Open Library is rate limiting searches. Try again shortly.", "rate-limited", response.headers?.get?.("retry-after"));
       }
       if (!response.ok) throw new ProviderError(`Book search returned ${response.status}.`, "provider-error");
-      const payload = await response.json();
-      return rankCandidates((payload.docs || []).map((doc) => normalizeDocument(doc, parsed)), parsed).slice(0, options?.limit || 12);
+      let payload;
+      try {
+        payload = await response.json();
+      } catch (_) {
+        throw new ProviderError("Open Library returned an unreadable response.", "malformed-response");
+      }
+      if (!payload || !Array.isArray(payload.docs)) {
+        throw new ProviderError("Open Library returned an unreadable response.", "malformed-response");
+      }
+      return rankCandidates(payload.docs.map((doc) => normalizeDocument(doc, parsed)), parsed).slice(0, options?.limit || 12);
     }
   }
 

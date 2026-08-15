@@ -1,6 +1,6 @@
 {
   "name": "libbysave",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "A dependency-free Chrome extension for book search, saved lists, and Libby availability.",
   "scripts": {

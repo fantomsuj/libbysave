@@ -45,7 +45,12 @@ const directoryProvider = new Directory.LibraryDirectoryProvider({ fetcher: fetc
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const task = handleMessage(message, sender);
   if (!task) return false;
-  task.then(sendResponse).catch((error) => sendResponse({ ok: false, error: error.message }));
+  task.then(sendResponse).catch((error) => sendResponse({
+    ok: false,
+    error: error.message,
+    errorCode: error.code || "unexpected-error",
+    retryAfter: error.retryAfter || null
+  }));
   return true;
 });
 
@@ -115,7 +120,7 @@ async function searchBooks(query, limit) {
   const waitMs = Math.max(0, 1000 - (Date.now() - lastProviderRequestAt));
   if (waitMs) await wait(waitMs);
   lastProviderRequestAt = Date.now();
-  const results = await searchProvider.search(query, { limit: limit || 12, offline: globalThis.navigator?.onLine === false });
+  const results = await searchProvider.search(query, { limit: limit || 12 });
   searchCache.set(key, { savedAt: Date.now(), results });
   if (searchCache.size > 30) searchCache.delete(searchCache.keys().next().value);
   return results;

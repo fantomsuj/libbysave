@@ -108,9 +108,37 @@ test("weak matches are labeled for review", () => {
   assert.equal(ranked[0].confidence, "review");
 });
 
-test("reports offline and rate-limit states cleanly", async () => {
-  const offline = new Search.OpenLibraryProvider({ fetchImpl: async () => { throw new Error("network"); } });
-  await assert.rejects(() => offline.search("The Stranger"), (error) => error.code === "offline");
+test("ignores stale offline hints and attempts the real request", async () => {
+  let attempted = false;
+  const provider = new Search.OpenLibraryProvider({ fetchImpl: async () => {
+    attempted = true;
+    return response({ docs });
+  } });
+  const results = await provider.search("The Stranger", { offline: true });
+  assert.equal(attempted, true);
+  assert.equal(results[0].title, "The Stranger");
+});
+
+test("reports network and rate-limit states accurately", async () => {
+  const unavailable = new Search.OpenLibraryProvider({ fetchImpl: async () => { throw new TypeError("Failed to fetch"); } });
+  await assert.rejects(
+    () => unavailable.search("The Stranger"),
+    (error) => error.code === "network-error" && !/offline/i.test(error.message)
+  );
   const limited = new Search.OpenLibraryProvider({ fetchImpl: async () => response({}, 429, { "retry-after": "2" }) });
   await assert.rejects(() => limited.search("The Stranger"), (error) => error.code === "rate-limited" && error.retryAfter === "2");
+});
+
+test("reports malformed provider responses without calling them offline", async () => {
+  const invalidJson = new Search.OpenLibraryProvider({ fetchImpl: async () => ({
+    ...response({}, 200),
+    json: async () => { throw new SyntaxError("invalid JSON"); }
+  }) });
+  await assert.rejects(
+    () => invalidJson.search("The Stranger"),
+    (error) => error.code === "malformed-response" && !/offline/i.test(error.message)
+  );
+
+  const missingDocs = new Search.OpenLibraryProvider({ fetchImpl: async () => response({ unexpected: true }) });
+  await assert.rejects(() => missingDocs.search("The Stranger"), (error) => error.code === "malformed-response");
 });
