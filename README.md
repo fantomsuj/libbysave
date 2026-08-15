@@ -31,9 +31,7 @@ The user must click **Borrow now** or **Place hold** for a specific title and li
 
 ### Tag imports
 
-The popup sends selected books to a persisted import queue. LibbySave opens searches in the chosen library and attempts to select the configured tag through Libby's visible UI. When the interface is ambiguous or changes, automation pauses and asks the user to finish or skip the current title instead of guessing.
-
-> The target tag should already exist in Libby for this MVP. Automatic tag creation is intentionally deferred until it can be verified against a stable Libby interface.
+The popup sends selected books to a persisted import queue. LibbySave opens searches in the chosen library and attempts to select the configured tag through Libby's visible UI. If that tag is missing, it conservatively attempts to create it through exact **New Tag** and **Create** controls. When the interface is ambiguous or changes, automation pauses and asks the user to finish or skip the current title instead of guessing.
 
 ## Supported sources
 

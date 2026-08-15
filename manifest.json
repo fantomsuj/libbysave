@@ -3,7 +3,7 @@
   "name": "LibbySave",
   "version": "0.1.0",
   "description": "See Libby availability on book lists and save whole lists to a Libby tag.",
-  "permissions": ["storage", "tabs"],
+  "permissions": ["storage"],
   "host_permissions": [
     "https://thunder.api.overdrive.com/*",
     "https://libbyapp.com/*"

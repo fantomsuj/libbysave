@@ -7,6 +7,7 @@
   let running = false;
   let phaseStartedAt = Date.now();
   let observer;
+  let tagCreationAttempted = false;
 
   init();
 
@@ -148,6 +149,11 @@
       return;
     }
 
+    if (await tryCreateTag(state.targetTag)) {
+      phaseStartedAt = Date.now();
+      return;
+    }
+
     const saveButton = findButton(/^(save|tag|add tag|manage tags)$/i);
     if (saveButton) {
       clickSafe(saveButton);
@@ -193,6 +199,36 @@
       const label = `${button.getAttribute("aria-label") || ""} ${button.textContent || ""}`.trim();
       return !FORBIDDEN.test(label) && pattern.test(label);
     }) || null;
+  }
+
+  async function tryCreateTag(tagName) {
+    const dialog = document.querySelector("[role='dialog'], [aria-modal='true']");
+    if (!dialog || !/tag/i.test(dialog.textContent || "")) return false;
+    const nameInput = [...dialog.querySelectorAll("input")].find((input) => {
+      const label = `${input.getAttribute("aria-label") || ""} ${input.getAttribute("placeholder") || ""}`;
+      return /tag.*name|name.*tag/i.test(label);
+    });
+    if (nameInput) {
+      nameInput.focus();
+      nameInput.value = tagName;
+      nameInput.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: tagName }));
+      nameInput.dispatchEvent(new Event("change", { bubbles: true }));
+      const create = [...dialog.querySelectorAll("button, [role='button']")].find((button) => /^create$/i.test(button.textContent.trim()));
+      if (create) {
+        clickSafe(create);
+        return true;
+      }
+    }
+    if (!tagCreationAttempted) {
+      const newTag = [...dialog.querySelectorAll("button, [role='button']")].find((button) => /^(new tag|create tag)$/i.test(button.textContent.trim()));
+      if (newTag) {
+        tagCreationAttempted = true;
+        clickSafe(newTag);
+        await wait(350);
+        return true;
+      }
+    }
+    return false;
   }
 
   function clickSafe(element) {
