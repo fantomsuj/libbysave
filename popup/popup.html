@@ -7,86 +7,54 @@
     <link rel="stylesheet" href="popup.css">
   </head>
   <body>
-    <header class="app-header">
-      <div class="brand">
-        <img src="../assets/icons/icon-48.png" alt="">
-        <div><strong>LibbySave</strong><small id="siteLabel">Books → your library</small></div>
-      </div>
-      <button id="settingsToggle" class="icon-button" type="button" aria-label="Open settings" aria-expanded="false" aria-controls="setup">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.12 2.12-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1 1.55V20.3h-3v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.88.34l-.06.06-2.12-2.12.06-.06A1.7 1.7 0 0 0 7.08 15a1.7 1.7 0 0 0-1.55-1H5.4v-3h.13a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.88l-.06-.06L8.8 5.94l.06.06a1.7 1.7 0 0 0 1.88.34 1.7 1.7 0 0 0 1-1.55V4.7h3v.09a1.7 1.7 0 0 0 1 1.55A1.7 1.7 0 0 0 17.62 6l.06-.06 2.12 2.12-.06.06A1.7 1.7 0 0 0 19.4 10a1.7 1.7 0 0 0 1.55 1h.13v3h-.13a1.7 1.7 0 0 0-1.55 1Z"/></svg>
-      </button>
+    <header>
+      <div class="brand"><img src="../assets/icons/icon-48.png" alt=""><div><strong>LibbySave</strong><small id="siteLabel">Search from anywhere</small></div></div>
+      <button id="settingsToggle" class="icon-button" aria-label="Settings">⚙</button>
     </header>
-
     <main>
-      <section id="setup" class="settings-panel hidden" aria-labelledby="settingsTitle">
-        <div class="section-heading"><div><span class="eyebrow">SETTINGS</span><h2 id="settingsTitle">Your libraries</h2></div></div>
-        <div id="libraryRows"></div>
-        <button id="addLibrary" class="button text-button full" type="button">+ Add another library</button>
-        <label class="field"><span>Default Libby tag</span><input id="targetTag" autocomplete="off" value="Saved from LibbySave"></label>
-        <label class="check"><input id="autoCheck" type="checkbox" checked><span>Show availability automatically on supported pages</span></label>
-        <button id="saveSettings" class="button primary full" type="button">Save settings</button>
-        <p class="hint">Enter the first part of the OverDrive address, such as <strong>nypl</strong>.</p>
+      <section class="command">
+        <label for="bookSearch">Search title, author, ISBN, or paste a book link</label>
+        <div class="search-box"><span aria-hidden="true">⌕</span><input id="bookSearch" type="search" role="combobox" aria-autocomplete="list" aria-controls="searchResults" aria-expanded="false" autocomplete="off" spellcheck="false" placeholder="The Stranger Camus"><kbd>↵</kbd></div>
+        <div class="command-row"><span id="searchStatus" role="status" aria-live="polite">Type to find and save a book.</span><button id="batchToggle" class="link-button" type="button">Paste a list</button></div>
+        <div id="searchResults" class="search-results hidden" role="listbox" aria-label="Book search results"></div>
       </section>
-
-      <form id="searchForm" class="search-wrap" role="search">
-        <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>
-        <label for="searchInput">Search books</label>
-        <input id="searchInput" type="search" inputmode="search" autocomplete="off" placeholder="Title, author, or ISBN" aria-describedby="searchHelp">
-        <button id="clearSearch" class="clear-button hidden" type="button" aria-label="Clear search">×</button>
-        <span id="searchHelp" class="sr-only">Search by book title, author, or ISBN. Press Enter to check your connected libraries.</span>
-      </form>
-
-      <div id="status" class="status-banner hidden" role="status" aria-live="polite"></div>
-
-      <section id="startState" class="start-state" aria-labelledby="startTitle">
-        <div id="recentSection" class="hidden">
-          <div class="section-heading compact"><h2 id="startTitle">Recent searches</h2></div>
-          <div id="recentSearches" class="recent-list"></div>
+      <nav class="tabs" aria-label="Popup views">
+        <button class="tab active" data-view="search" type="button">Search</button>
+        <button class="tab" data-view="saved" type="button">Saved <span id="savedCount">0</span></button>
+        <button class="tab" data-view="page" type="button">This page <span id="pageCount">0</span></button>
+      </nav>
+      <section id="searchView" class="view">
+        <div class="empty compact"><div class="empty-art">L</div><h2>Your next read, one Enter away</h2><p>Search without leaving the page you are on. Saving is instant; Libby availability fills in afterward.</p><div class="examples"><button data-query="The Stranger Camus">The Stranger Camus</button><button data-query="9780679720201">9780679720201</button></div></div>
+      </section>
+      <section id="batchView" class="view hidden">
+        <div class="section-title"><div><small>QUICK ADD</small><h2>Paste a reading list</h2></div></div>
+        <label class="field"><span>One book per line</span><textarea id="batchInput" rows="6" placeholder="The Stranger — Albert Camus&#10;The Great Transformation — Karl Polanyi&#10;On Liberty — John Stuart Mill"></textarea></label>
+        <button id="reviewBatch" class="primary full" type="button">Review matches</button>
+        <div id="batchStatus" class="hint" role="status"></div><div id="batchResults" class="batch-results"></div>
+        <button id="saveBatch" class="primary full hidden" type="button">Save confirmed matches</button>
+      </section>
+      <section id="savedView" class="view hidden">
+        <div class="section-title"><div><small>YOUR LIST</small><h2>Saved books</h2></div><button id="refreshSaved" class="quiet" type="button">Refresh</button></div>
+        <div class="filters" aria-label="Filter saved books">
+          <label><input type="checkbox" data-filter="available"> Available now</label><label><input type="checkbox" data-filter="wait"> Wait list</label><label><input type="checkbox" data-filter="ebook"> Ebook</label><label><input type="checkbox" data-filter="audiobook"> Audiobook</label><label><input type="checkbox" data-filter="removed"> Removed</label>
         </div>
-        <div id="pageSection" class="hidden">
-          <div class="section-heading compact"><h2>Found on this page</h2><button id="checkAll" class="text-button" type="button">Check all</button></div>
-          <div id="pageBooks" class="page-books"></div>
-          <div class="bulk-save">
-            <div class="field-row"><label class="field"><span>Save selected to</span><input id="importTag"></label><label class="field"><span>Using library</span><select id="importLibrary" aria-label="Import library"></select></label></div>
-            <button id="importAll" class="button secondary full" type="button">Save selected books</button>
-            <small>Saving never borrows a title or places a hold.</small>
-          </div>
-        </div>
-        <div id="empty" class="empty-state">
-          <img src="../assets/icons/icon-48.png" alt="">
-          <h2>Find your next read</h2>
-          <p>Search here or open a supported book page to check Libby.</p>
+        <div id="savedList" class="book-list"></div>
+        <div id="savedImport" class="import-box hidden"><strong><span id="selectedSavedCount">0</span> selected</strong><label class="field"><span>Libby tag</span><input id="savedImportTag"></label><div class="import-row"><select id="savedImportLibrary" aria-label="Import library"></select><button id="importSaved" class="primary" type="button">Send to tag</button></div><small>Tagging never borrows or places a hold.</small></div>
+      </section>
+      <section id="pageView" class="view hidden">
+        <div id="pageEmpty" class="empty compact"><h2>No books found here</h2><p>The popup search works from every webpage.</p></div>
+        <div id="booksSection" class="hidden">
+          <div class="section-title"><div><small>FOUND ON THIS PAGE</small><h2><span id="bookCount">0</span> books</h2></div><button id="checkAll" class="quiet" type="button">Check all</button></div>
+          <div class="summary" id="summary"><span>Check availability across your libraries.</span></div><div id="bookList" class="book-list"></div>
+          <div class="import-box"><label class="field"><span>Save list to tag</span><input id="importTag"></label><div class="import-row"><select id="importLibrary" aria-label="Import library"></select><button id="importAll" class="primary" type="button">Send to Libby</button></div><small>Borrowing and holds always require their own explicit click.</small></div>
         </div>
       </section>
-
-      <section id="resultSection" class="hidden" aria-label="Book result">
-        <article id="bookResult" class="result-card"></article>
-        <div class="section-heading availability-heading"><h2>Library availability</h2><span id="libraryCount"></span></div>
-        <div id="availabilityList" class="availability-list" aria-live="polite"></div>
-        <button id="saveBook" class="button secondary save-button full" type="button"></button>
-      </section>
-
-      <section id="noLibraries" class="empty-state callout hidden">
-        <h2>Connect a library to begin</h2>
-        <p>Add your library once, then LibbySave can check every book you search.</p>
-        <button id="openSetup" class="button primary" type="button">Add a library</button>
+      <section id="setup" class="setup hidden">
+        <div class="section-title"><div><small>SETTINGS</small><h2>Your libraries</h2></div></div><div id="libraryRows"></div>
+        <button id="addLibrary" class="quiet full" type="button">+ Add another library</button><label class="field"><span>Default Libby tag</span><input id="targetTag" value="Saved from LibbySave"></label><label class="check"><input id="autoCheck" type="checkbox" checked><span>Show availability automatically on supported pages</span></label><button id="saveSettings" class="primary full" type="button">Save settings</button><p class="hint">Use the first part of your OverDrive URL, e.g. <strong>nypl</strong>.</p>
       </section>
     </main>
-
-    <footer><span id="footerCount">0 libraries connected</span></footer>
-    <div id="toast" role="status" aria-live="polite"></div>
-
-    <dialog id="confirmDialog" aria-labelledby="confirmTitle">
-      <form method="dialog">
-        <span class="eyebrow">CONFIRM ACTION</span>
-        <h2 id="confirmTitle">Continue in Libby?</h2>
-        <p id="confirmCopy"></p>
-        <div class="dialog-actions"><button class="button text-button" value="cancel">Cancel</button><button id="confirmAction" class="button primary" value="confirm">Confirm</button></div>
-      </form>
-    </dialog>
-
-    <script src="../src/shared.js"></script>
-    <script src="state.js"></script>
-    <script src="popup.js"></script>
+    <div id="toast" role="status" aria-live="polite"><span></span><button type="button" class="hidden">Undo</button></div>
+    <script src="../src/shared.js"></script><script src="../src/book-search.js"></script><script src="../src/saved-books.js"></script><script src="../src/search-controller.js"></script><script src="popup.js"></script>
   </body>
 </html>
